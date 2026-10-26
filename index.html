@@ -43,16 +43,17 @@
 
   <script type="text/babel">
     function App() {
-      const [view, setView] = React.useState('store');
-      // استرجاع المنتجات المحفوظة محلياً كاحتياطي فوري لمنع الاختفاء
+      const [view, setView] = React.useState('store'); // 'store', 'cart', 'admin', 'checkout'
       const [products, setProducts] = React.useState(() => {
         const saved = localStorage.getItem('elkazzaz_local_products');
         return saved ? JSON.parse(saved) : [];
       });
       const [cart, setCart] = React.useState([]);
+      const [orders, setOrders] = React.useState([]);
       const [isAdmin, setIsAdmin] = React.useState(false);
       const [passInput, setPassInput] = React.useState('');
       const [newProd, setNewProd] = React.useState({ name: '', price: '', stock: '', category: 'إلكترونيات وخَدَمات', image: '', description: '' });
+      const [customer, setCustomer] = React.useState({ name: '', phone: '', address: '', notes: '' });
       const [toast, setToast] = React.useState(null);
       const [isDbReady, setIsDbReady] = React.useState(false);
 
@@ -67,6 +68,7 @@
             clearInterval(timer);
             const { collection, onSnapshot } = window.firebaseFns;
             try {
+              // جلب المنتجات
               onSnapshot(collection(window.db, 'products'), (snapshot) => {
                 if (!snapshot.empty) {
                   const prods = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -74,9 +76,12 @@
                   localStorage.setItem('elkazzaz_local_products', JSON.stringify(prods));
                 }
                 setIsDbReady(true);
-              }, (err) => {
-                console.error("Firestore Read Error:", err);
-                setIsDbReady(true);
+              });
+
+              // جلب الطلبات للمدير
+              onSnapshot(collection(window.db, 'orders'), (snapshot) => {
+                const ords = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+                setOrders(ords);
               });
             } catch(e) {
               console.error("Snapshot Error:", e);
@@ -112,7 +117,6 @@
           createdAt: new Date().toISOString()
         };
 
-        // الحفظ محلياً فوراً لضمان عدم اختفائه
         const tempId = 'local_' + Date.now();
         const updatedList = [{ id: tempId, ...productData }, ...products];
         setProducts(updatedList);
@@ -121,7 +125,6 @@
         setNewProd({ name: '', price: '', stock: '', category: 'إلكترونيات وخَدَمات', image: '', description: '' });
         showMsg('تم الحفظ ونشر المنتج بالسحابة فوراً 🚀');
 
-        // محاولة الحفظ في فايربيس سحابياً في الخلفية
         if (window.db && window.firebaseFns) {
           try {
             const { collection, addDoc } = window.firebaseFns;
@@ -150,6 +153,40 @@
         }
       };
 
+      const totalPrice = cart.reduce((sum, item) => sum + item.price, 0);
+
+      const handleCheckoutSubmit = async (e) => {
+        e.preventDefault();
+        if (!customer.name || !customer.phone || !customer.address) {
+          showMsg('يرجى إكمال بيانات الشحن (الاسم، الهاتف، العنوان)');
+          return;
+        }
+
+        const orderData = {
+          customerName: customer.name,
+          phone: customer.phone,
+          address: customer.address,
+          notes: customer.notes,
+          items: cart,
+          total: totalPrice,
+          date: new Date().toLocaleString('ar-EG')
+        };
+
+        try {
+          if (window.db && window.firebaseFns) {
+            const { collection, addDoc } = window.firebaseFns;
+            await addDoc(collection(window.db, 'orders'), orderData);
+          }
+          showMsg('تم إرسال طلبك بنجاح! جاري تحويلك...');
+          setTimeout(() => {
+            setCart([]);
+            setView('store');
+          }, 2000);
+        } catch (err) {
+          alert('حدث خطأ أثناء إرسال الطلب: ' + err.message);
+        }
+      };
+
       return (
         <div className="min-h-screen pb-16">
           {toast && (
@@ -158,6 +195,7 @@
             </div>
           )}
 
+          {/* الترويسة */}
           <header className="bg-white border-b border-slate-200 sticky top-0 z-30 p-4 shadow-sm">
             <div className="max-w-6xl mx-auto flex justify-between items-center">
               <div>
@@ -166,10 +204,16 @@
               </div>
               <div className="flex gap-2">
                 <button 
-                  onClick={() => setView(view === 'store' ? 'admin' : 'store')}
-                  className="bg-slate-900 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-md hover:bg-slate-800"
+                  onClick={() => setView('cart')}
+                  className="bg-amber-500 text-white px-3 py-2 rounded-xl text-xs font-bold shadow-md relative"
                 >
-                  {view === 'store' ? '🔒 لوحة التحكم' : '🛍️ العرض للمشتري'}
+                  🛒 السلة ({cart.length})
+                </button>
+                <button 
+                  onClick={() => setView(view === 'admin' ? 'store' : 'admin')}
+                  className="bg-slate-900 text-white px-3 py-2 rounded-xl text-xs font-bold shadow-md hover:bg-slate-800"
+                >
+                  {view === 'admin' ? '🛍️ المتجر' : '🔒 لوحة التحكم'}
                 </button>
               </div>
             </div>
@@ -182,7 +226,7 @@
               <div>
                 <div className="flex justify-between items-center mb-6">
                   <h2 className="text-xl font-black text-slate-900">المنتجات المتاحة أونلاين</h2>
-                  <span className="text-xs bg-amber-50 text-amber-700 px-3 py-1 rounded-full font-bold">السلة: {cart.length} منتج</span>
+                  <span className="text-xs bg-emerald-50 text-emerald-700 px-3 py-1 rounded-full font-bold">إجمالي المنتجات: {products.length}</span>
                 </div>
 
                 {products.length === 0 ? (
@@ -224,6 +268,108 @@
                   </div>
                 )}
               </div>
+            ) : view === 'cart' ? (
+              <div className="max-w-xl mx-auto bg-white p-6 rounded-3xl border border-slate-200 shadow-xl space-y-6">
+                <div className="flex justify-between items-center border-b pb-3">
+                  <h2 className="font-bold text-lg text-slate-900">سلة المشتريات</h2>
+                  <button onClick={() => setView('store')} className="text-xs text-amber-600 font-bold">تابع الشراء 🛍️</button>
+                </div>
+
+                {cart.length === 0 ? (
+                  <div className="text-center py-12 text-slate-400">
+                    <p className="text-sm">سلة المشتريات فارغة حالياً.</p>
+                    <button onClick={() => setView('store')} className="mt-4 bg-amber-500 text-white px-4 py-2 rounded-xl text-xs font-bold">تصفح المنتجات</button>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="divide-y max-h-60 overflow-y-auto">
+                      {cart.map((item, index) => (
+                        <div key={index} className="py-3 flex justify-between items-center text-xs">
+                          <div>
+                            <span className="font-bold text-slate-900">{item.name}</span>
+                            <span className="text-slate-400 block">{item.price} ج.م</span>
+                          </div>
+                          <button 
+                            onClick={() => {
+                              const updatedCart = cart.filter((_, i) => i !== index);
+                              setCart(updatedCart);
+                            }}
+                            className="text-red-500 font-bold text-xs bg-red-50 px-2.5 py-1 rounded-lg"
+                          >
+                            حذف
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="border-t pt-4 flex justify-between items-center font-black text-base">
+                      <span>إجمالي الطلب:</span>
+                      <span className="text-amber-600">{totalPrice} ج.م</span>
+                    </div>
+
+                    <button 
+                      onClick={() => setView('checkout')}
+                      className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-xl text-sm shadow-lg"
+                    >
+                      الانتقال لشاشة الدفع وتأكيد الطلب 💳
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : view === 'checkout' ? (
+              <div className="max-w-xl mx-auto bg-white p-6 rounded-3xl border border-slate-200 shadow-xl space-y-6">
+                <div className="flex justify-between items-center border-b pb-3">
+                  <h2 className="font-bold text-lg text-slate-900">إتمام الشراء والدفع</h2>
+                  <button onClick={() => setView('cart')} className="text-xs text-amber-600 font-bold">العودة للسلة</button>
+                </div>
+
+                <form onSubmit={handleCheckoutSubmit} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-600 mb-1">الاسم الكامل</label>
+                    <input 
+                      type="text" required placeholder="أدخل اسمك الكريم..."
+                      value={customer.name} onChange={e => setCustomer({...customer, name: e.target.value})}
+                      className="w-full p-3 rounded-xl border text-xs"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-600 mb-1">رقم الهاتف (للتواصل وتأكيد الشحن)</label>
+                    <input 
+                      type="tel" required placeholder="01xxxxxxxxx"
+                      value={customer.phone} onChange={e => setCustomer({...customer, phone: e.target.value})}
+                      className="w-full p-3 rounded-xl border text-xs"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-600 mb-1">عنوان الاستلام بالتفصيل</label>
+                    <textarea 
+                      required placeholder="المحافظة، المركز، الشارع..." rows="2"
+                      value={customer.address} onChange={e => setCustomer({...customer, address: e.target.value})}
+                      className="w-full p-3 rounded-xl border text-xs"
+                    ></textarea>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-600 mb-1">ملاحظات إضافية (اختياري)</label>
+                    <input 
+                      type="text" placeholder="أي تفاصيل خاصة بالطلب..."
+                      value={customer.notes} onChange={e => setCustomer({...customer, notes: e.target.value})}
+                      className="w-full p-3 rounded-xl border text-xs"
+                    />
+                  </div>
+
+                  <div className="bg-slate-50 p-4 rounded-2xl border flex justify-between items-center text-sm font-black">
+                    <span>المطلوب دفعه عند الاستلام:</span>
+                    <span className="text-amber-600">{totalPrice} ج.م</span>
+                  </div>
+
+                  <button 
+                    type="submit"
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-xl text-sm shadow-lg"
+                  >
+                    تأكيد الطلب الآن 🚀
+                  </button>
+                </form>
+              </div>
             ) : (
               <div className="max-w-xl mx-auto bg-white p-6 rounded-3xl border border-slate-200 shadow-xl">
                 {!isAdmin ? (
@@ -255,12 +401,12 @@
                 ) : (
                   <div className="space-y-6">
                     <div className="flex justify-between items-center border-b pb-3">
-                      <h2 className="font-bold text-lg text-slate-900">إدارة منتجات المتجر السحابي</h2>
+                      <h2 className="font-bold text-lg text-slate-900">لوحة تحكم مكتب القزاز</h2>
                       <button onClick={() => setView('store')} className="text-xs text-amber-600 font-bold">العودة للمتجر 🛍️</button>
                     </div>
 
                     <form onSubmit={handleAddProduct} className="space-y-3 bg-slate-50 p-4 rounded-2xl border">
-                      <h3 className="font-bold text-xs text-amber-700">إضافة منتج جديد يظهر فوراً على كل الأجهزة</h3>
+                      <h3 className="font-bold text-xs text-amber-700">إضافة منتج جديد سحابياً</h3>
                       <input 
                         type="text" placeholder="اسم المنتج" required
                         value={newProd.name} onChange={e => setNewProd({...newProd, name: e.target.value})}
@@ -293,12 +439,31 @@
                       </button>
                     </form>
 
-                    <div className="space-y-2">
-                      <h3 className="font-bold text-xs text-slate-600">المنتجات المسجلة ({products.length}):</h3>
+                    {/* قسم عرض طلبات العملاء */}
+                    <div className="space-y-3 pt-4 border-t">
+                      <h3 className="font-bold text-xs text-slate-900">طلبات العملاء الواردة ({orders.length}):</h3>
+                      {orders.length === 0 ? (
+                        <p className="text-xs text-slate-400">لا توجد طلبات جديدة حتى الآن.</p>
+                      ) : (
+                        orders.map(ord => (
+                          <div key={ord.id} className="bg-amber-50 p-3 rounded-xl border border-amber-200 text-xs space-y-1">
+                            <div className="flex justify-between font-bold text-slate-900">
+                              <span>{ord.customerName} ({ord.phone})</span>
+                              <span className="text-amber-700">{ord.total} ج.م</span>
+                            </div>
+                            <p className="text-slate-600">العنوان: {ord.address}</p>
+                            <p className="text-[10px] text-slate-400">التاريخ: {ord.date}</p>
+                          </div>
+                        ))
+                      )}
+                    </div>
+
+                    <div className="space-y-2 pt-4 border-t">
+                      <h3 className="font-bold text-xs text-slate-600">إدارة المنتجات المسجلة ({products.length}):</h3>
                       {products.map(p => (
-                        <div key={p.id} className="flex justify-between items-center bg-slate-50 p-3 rounded-xl border text-xs">
+                        <div key={p.id} className="flex justify-between items-center bg-slate-50 p-2.5 rounded-xl border text-xs">
                           <span className="font-bold">{p.name} - <span className="text-amber-600">{p.price} ج.م</span></span>
-                          <button onClick={() => handleDelete(p.id)} className="bg-red-100 text-red-600 px-3 py-1 rounded-lg font-bold">حذف</button>
+                          <button onClick={() => handleDelete(p.id)} className="bg-red-100 text-red-600 px-2.5 py-1 rounded-lg font-bold">حذف</button>
                         </div>
                       ))}
                     </div>
