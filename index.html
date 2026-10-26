@@ -15,7 +15,7 @@
 <body class="bg-slate-50 font-sans text-slate-800">
   <div id="root"></div>
 
-  <!-- الاتصال المباشر بـ Firebase v13 مع معالجة الأخطاء -->
+  <!-- الاتصال المباشر والمجبر بـ Firebase v13 -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/13.1.0/firebase-app.js";
     import { getFirestore, collection, addDoc, deleteDoc, doc, onSnapshot, setDoc } from "https://www.gstatic.com/firebasejs/13.1.0/firebase-firestore.js";
@@ -48,30 +48,20 @@
       const [view, setView] = React.useState('store'); 
       const [adminTab, setAdminTab] = React.useState('products'); 
       
-      const [products, setProducts] = React.useState(() => {
-        const saved = localStorage.getItem('elkazzaz_local_products');
-        return saved ? JSON.parse(saved) : [];
-      });
+      const [products, setProducts] = React.useState([]);
       const [cart, setCart] = React.useState([]);
-      
-      const [orders, setOrders] = React.useState(() => {
-        const saved = localStorage.getItem('elkazzaz_local_orders');
-        return saved ? JSON.parse(saved) : [];
-      });
+      const [orders, setOrders] = React.useState([]);
 
       const [isAdmin, setIsAdmin] = React.useState(false);
       const [passInput, setPassInput] = React.useState('');
       
-      const [settings, setSettings] = React.useState(() => {
-        const saved = localStorage.getItem('elkazzaz_settings');
-        return saved ? JSON.parse(saved) : {
-          storeName: 'متجر مكتب القزاز للبرمجيات',
-          walletNumber: '01000000000',
-          adminPassword: 'admin123',
-          enableCash: true,
-          enableVodafone: true,
-          enableVisa: true
-        };
+      const [settings, setSettings] = React.useState({
+        storeName: 'متجر مكتب القزاز للبرمجيات',
+        walletNumber: '01000000000',
+        adminPassword: 'admin123',
+        enableCash: true,
+        enableVodafone: true,
+        enableVisa: true
       });
 
       const [newProd, setNewProd] = React.useState({ name: '', price: '', stock: '', category: 'إلكترونيات وخَدَمات', image: '', description: '' });
@@ -87,65 +77,45 @@
 
       React.useEffect(() => {
         const timer = setInterval(() => {
-          if (window.firebaseError) {
-            clearInterval(timer);
-            setCloudStatus('خطأ في إعدادات فايربيس: ' + window.firebaseError);
-            setIsDbReady(true);
-            return;
-          }
-
           if (window.isFirebaseInitialized && window.db) {
             clearInterval(timer);
             const { collection, onSnapshot, doc } = window.firebaseFns;
             try {
               setCloudStatus('متصل بالسحابة 🟢');
+              setIsDbReady(true);
               
-              // جلب المنتجات سحابياً
+              // جلب المنتجات سحابياً بشكل مباشر
               onSnapshot(collection(window.db, 'products'), (snapshot) => {
                 const prods = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-                if (prods.length > 0) {
-                  setProducts(prods);
-                  localStorage.setItem('elkazzaz_local_products', JSON.stringify(prods));
-                }
-                setIsDbReady(true);
+                setProducts(prods);
               }, (err) => {
-                console.error("Firestore products read error:", err);
-                setCloudStatus('خطأ في قراءة المنتجات من السحابة (تأكد من Rules)');
-                setIsDbReady(true);
+                console.error("Firestore error:", err);
               });
 
               // جلب الطلبات سحابياً
               onSnapshot(collection(window.db, 'orders'), (snapshot) => {
                 const ords = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-                if (ords.length > 0) {
-                  setOrders(ords);
-                  localStorage.setItem('elkazzaz_local_orders', JSON.stringify(ords));
-                }
+                setOrders(ords);
               });
 
               // جلب الإعدادات سحابياً
               onSnapshot(doc(window.db, 'settings', 'general'), (docSnap) => {
                 if (docSnap.exists()) {
-                  const data = docSnap.data();
-                  setSettings(data);
-                  localStorage.setItem('elkazzaz_settings', JSON.stringify(data));
+                  setSettings(docSnap.data());
                 }
               });
 
             } catch(e) {
               console.error("Snapshot Error:", e);
-              setCloudStatus('خطأ تشغيل السحابة: ' + e.message);
+              setCloudStatus('خطأ بالسحابة');
               setIsDbReady(true);
             }
           }
         }, 200);
 
         const fallbackTimer = setTimeout(() => {
-          if (!isDbReady) {
-            setIsDbReady(true);
-            setCloudStatus('يعمل بالوضع المحلي الاحتياطي');
-          }
-        }, 3000);
+          setIsDbReady(true);
+        }, 2500);
 
         return () => {
           clearInterval(timer);
@@ -170,39 +140,28 @@
           createdAt: new Date().toISOString()
         };
 
-        // حفظ محلي فوري
-        const tempId = 'local_' + Date.now();
-        const updatedList = [{ id: tempId, ...productData }, ...products];
-        setProducts(updatedList);
-        localStorage.setItem('elkazzaz_local_products', JSON.stringify(updatedList));
-
-        setNewProd({ name: '', price: '', stock: '', category: 'إلكترونيات وخَدَمات', image: '', description: '' });
-        showMsg('تم الحفظ بنجاح ونشره بالسحابة 🚀');
-
-        // محاولة الحفظ السحابي الفعلي في فايربيس
-        if (window.db && window.firebaseFns) {
-          try {
+        try {
+          if (window.db && window.firebaseFns) {
             const { collection, addDoc } = window.firebaseFns;
             await addDoc(collection(window.db, 'products'), productData);
-          } catch (err) {
-            console.error("Cloud save failed:", err);
-            alert("فشل الحفظ في سحابة فايربيس. تأكد من ضبط Security Rules لتكون عامة (allow read, write: if true;)");
+            setNewProd({ name: '', price: '', stock: '', category: 'إلكترونيات وخَدَمات', image: '', description: '' });
+            showMsg('تم الحفظ في السحابة بنجاح 🚀');
+          } else {
+            alert('قاعدة البيانات غير متصلة بالسحابة حالياً!');
           }
+        } catch (err) {
+          alert('فشل الحفظ بالسحابة: ' + err.message);
         }
       };
 
       const handleDelete = async (id) => {
-        if (confirm('هل تريد حذف هذا المنتج نهائياً؟')) {
+        if (confirm('هل تريد حذف هذا المنتج نهائياً من السحابة؟')) {
           try {
-            const updatedList = products.filter(p => p.id !== id);
-            setProducts(updatedList);
-            localStorage.setItem('elkazzaz_local_products', JSON.stringify(updatedList));
-
-            if (!id.startsWith('local_') && window.db) {
+            if (window.db && window.firebaseFns) {
               const { deleteDoc, doc } = window.firebaseFns;
               await deleteDoc(doc(window.db, 'products', id));
+              showMsg('تم الحذف من السحابة بنجاح');
             }
-            showMsg('تم حذف المنتج بنجاح');
           } catch (err) {
             showMsg('فشل الحذف: ' + err.message);
           }
@@ -211,16 +170,15 @@
 
       const handleSaveSettings = async (e) => {
         e.preventDefault();
-        localStorage.setItem('elkazzaz_settings', JSON.stringify(settings));
-        if (window.db && window.firebaseFns) {
-          try {
+        try {
+          if (window.db && window.firebaseFns) {
             const { doc, setDoc } = window.firebaseFns;
             await setDoc(doc(window.db, 'settings', 'general'), settings);
-          } catch (err) {
-            console.error("Save settings cloud error:", err);
+            showMsg('تم حفظ الإعدادات في السحابة بنجاح ⚙️');
           }
+        } catch (err) {
+          alert('فشل حفظ الإعدادات: ' + err.message);
         }
-        showMsg('تم حفظ إعدادات المتجر بنجاح ⚙️');
       };
 
       const totalPrice = cart.reduce((sum, item) => sum + item.price, 0);
@@ -250,27 +208,20 @@
         };
 
         try {
-          const newOrdersList = [{ id: 'order_' + Date.now(), ...orderData }, ...orders];
-          setOrders(newOrdersList);
-          localStorage.setItem('elkazzaz_local_orders', JSON.stringify(newOrdersList));
-
           if (window.db && window.firebaseFns) {
             const { collection, addDoc } = window.firebaseFns;
             await addDoc(collection(window.db, 'orders'), orderData);
+            showMsg('تم إرسال طلبك والدفع بنجاح للسحابة! 🎉');
+            setTimeout(() => {
+              setCart([]);
+              setCustomer({ name: '', phone: '', address: '', notes: '', paymentMethod: 'vodafone', transactionId: '' });
+              setView('store');
+            }, 2000);
+          } else {
+            alert('غير متصل بالسحابة لإرسال الطلب!');
           }
-
-          showMsg('تم إرسال طلبك والدفع بنجاح! 🎉');
-          setTimeout(() => {
-            setCart([]);
-            setCustomer({ name: '', phone: '', address: '', notes: '', paymentMethod: 'vodafone', transactionId: '' });
-            setView('store');
-          }, 2000);
         } catch (err) {
-          showMsg('تم تسجيل وإرسال الطلب بنجاح! 🎉');
-          setTimeout(() => {
-            setCart([]);
-            setView('store');
-          }, 2000);
+          alert('فشل إرسال الطلب للسحابة: ' + err.message);
         }
       };
 
@@ -598,7 +549,7 @@
                         </form>
 
                         <div className="space-y-2">
-                          <h3 className="font-bold text-xs text-slate-600">المنتجات المسجلة:</h3>
+                          <h3 className="font-bold text-xs text-slate-600">المنتجات المسجلة سحابياً:</h3>
                           {products.map(p => (
                             <div key={p.id} className="flex justify-between items-center bg-slate-50 p-2.5 rounded-xl border text-xs">
                               <span className="font-bold">{p.name} - <span className="text-amber-600">{p.price} ج.م</span></span>
@@ -676,7 +627,7 @@
                               type="checkbox" checked={settings.enableVisa}
                               onChange={e => setSettings({...settings, enableVisa: e.target.checked})}
                             />
-                            <span>تفعيل الدفع عبر الفيซا والماستركارد (Visa)</span>
+                            <span>تفعيل الدفع عبر الفيسا والماستركارد (Visa)</span>
                           </label>
                           <label className="flex items-center gap-2">
                             <input 
