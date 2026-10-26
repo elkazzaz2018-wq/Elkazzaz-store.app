@@ -18,7 +18,7 @@
   <!-- الاتصال المباشر بـ Firebase v13 -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/13.1.0/firebase-app.js";
-    import { getFirestore, collection, addDoc, deleteDoc, doc, onSnapshot } from "https://www.gstatic.com/firebasejs/13.1.0/firebase-firestore.js";
+    import { getFirestore, collection, addDoc, deleteDoc, doc, onSnapshot, setDoc } from "https://www.gstatic.com/firebasejs/13.1.0/firebase-firestore.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyAz4Vu2-04TRBOz4OaQy9Bq7XEge08hNfo",
@@ -34,7 +34,7 @@
       const app = initializeApp(firebaseConfig);
       const db = getFirestore(app);
       window.db = db;
-      window.firebaseFns = { collection, addDoc, deleteDoc, doc, onSnapshot };
+      window.firebaseFns = { collection, addDoc, deleteDoc, doc, onSnapshot, setDoc };
       window.isFirebaseInitialized = true;
     } catch (error) {
       console.error("Firebase Init Error:", error);
@@ -43,7 +43,9 @@
 
   <script type="text/babel">
     function App() {
-      const [view, setView] = React.useState('store'); // 'store', 'cart', 'admin', 'checkout'
+      const [view, setView] = React.useState('store'); // 'store', 'cart', 'admin', 'checkout', 'settings'
+      const [adminTab, setAdminTab] = React.useState('products'); // 'products', 'orders', 'settings'
+      
       const [products, setProducts] = React.useState(() => {
         const saved = localStorage.getItem('elkazzaz_local_products');
         return saved ? JSON.parse(saved) : [];
@@ -52,8 +54,22 @@
       const [orders, setOrders] = React.useState([]);
       const [isAdmin, setIsAdmin] = React.useState(false);
       const [passInput, setPassInput] = React.useState('');
+      
+      // إعدادات المتجر Default Settings
+      const [settings, setSettings] = React.useState(() => {
+        const saved = localStorage.getItem('elkazzaz_settings');
+        return saved ? JSON.parse(saved) : {
+          storeName: 'متجر مكتب القزاز للبرمجيات',
+          walletNumber: '01000000000',
+          adminPassword: 'admin123',
+          enableCash: true,
+          enableVodafone: true,
+          enableVisa: true
+        };
+      });
+
       const [newProd, setNewProd] = React.useState({ name: '', price: '', stock: '', category: 'إلكترونيات وخَدَمات', image: '', description: '' });
-      const [customer, setCustomer] = React.useState({ name: '', phone: '', address: '', notes: '' });
+      const [customer, setCustomer] = React.useState({ name: '', phone: '', address: '', notes: '', paymentMethod: 'vodafone', transactionId: '' });
       const [toast, setToast] = React.useState(null);
       const [isDbReady, setIsDbReady] = React.useState(false);
 
@@ -66,7 +82,7 @@
         const timer = setInterval(() => {
           if (window.isFirebaseInitialized && window.db) {
             clearInterval(timer);
-            const { collection, onSnapshot } = window.firebaseFns;
+            const { collection, onSnapshot, doc } = window.firebaseFns;
             try {
               // جلب المنتجات
               onSnapshot(collection(window.db, 'products'), (snapshot) => {
@@ -83,6 +99,16 @@
                 const ords = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
                 setOrders(ords);
               });
+
+              // جلب الإعدادات سحابياً
+              onSnapshot(doc(window.db, 'settings', 'general'), (docSnap) => {
+                if (docSnap.exists()) {
+                  const data = docSnap.data();
+                  setSettings(data);
+                  localStorage.setItem('elkazzaz_settings', JSON.stringify(data));
+                }
+              });
+
             } catch(e) {
               console.error("Snapshot Error:", e);
               setIsDbReady(true);
@@ -153,6 +179,20 @@
         }
       };
 
+      const handleSaveSettings = async (e) => {
+        e.preventDefault();
+        localStorage.setItem('elkazzaz_settings', JSON.stringify(settings));
+        if (window.db && window.firebaseFns) {
+          try {
+            const { doc, setDoc } = window.firebaseFns;
+            await setDoc(doc(window.db, 'settings', 'general'), settings);
+          } catch (err) {
+            console.error("Save settings cloud error:", err);
+          }
+        }
+        showMsg('تم حفظ إعدادات المتجر بنجاح ⚙️');
+      };
+
       const totalPrice = cart.reduce((sum, item) => sum + item.price, 0);
 
       const handleCheckoutSubmit = async (e) => {
@@ -162,11 +202,18 @@
           return;
         }
 
+        if (customer.paymentMethod === 'vodafone' && !customer.transactionId) {
+          showMsg('يرجى كتابة رقم العملية أو رقم المحفظة المحول منها');
+          return;
+        }
+
         const orderData = {
           customerName: customer.name,
           phone: customer.phone,
           address: customer.address,
           notes: customer.notes,
+          paymentMethod: customer.paymentMethod,
+          transactionId: customer.transactionId || 'N/A',
           items: cart,
           total: totalPrice,
           date: new Date().toLocaleString('ar-EG')
@@ -177,7 +224,7 @@
             const { collection, addDoc } = window.firebaseFns;
             await addDoc(collection(window.db, 'orders'), orderData);
           }
-          showMsg('تم إرسال طلبك بنجاح! جاري تحويلك...');
+          showMsg('تم إرسال طلبك والدفع بنجاح! 🎉');
           setTimeout(() => {
             setCart([]);
             setView('store');
@@ -199,13 +246,13 @@
           <header className="bg-white border-b border-slate-200 sticky top-0 z-30 p-4 shadow-sm">
             <div className="max-w-6xl mx-auto flex justify-between items-center">
               <div>
-                <h1 className="font-bold text-slate-900 text-base">متجر مكتب القزاز للبرمجيات</h1>
+                <h1 className="font-bold text-slate-900 text-base">{settings.storeName}</h1>
                 <p className="text-[11px] text-emerald-600 font-medium">مزامنة سحابية لحظية 🟢</p>
               </div>
               <div className="flex gap-2">
                 <button 
                   onClick={() => setView('cart')}
-                  className="bg-amber-500 text-white px-3 py-2 rounded-xl text-xs font-bold shadow-md relative"
+                  className="bg-amber-500 text-white px-3 py-2 rounded-xl text-xs font-bold shadow-md"
                 >
                   🛒 السلة ({cart.length})
                 </button>
@@ -319,46 +366,106 @@
             ) : view === 'checkout' ? (
               <div className="max-w-xl mx-auto bg-white p-6 rounded-3xl border border-slate-200 shadow-xl space-y-6">
                 <div className="flex justify-between items-center border-b pb-3">
-                  <h2 className="font-bold text-lg text-slate-900">إتمام الشراء والدفع</h2>
+                  <h2 className="font-bold text-lg text-slate-900">إتمام الشراء والدفع أونلاين</h2>
                   <button onClick={() => setView('cart')} className="text-xs text-amber-600 font-bold">العودة للسلة</button>
                 </div>
 
                 <form onSubmit={handleCheckoutSubmit} className="space-y-4">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-600 mb-1">الاسم الكامل</label>
+                  <div className="space-y-3">
+                    <h3 className="font-bold text-xs text-slate-700">1. بيانات الشحن والاستلام</h3>
                     <input 
-                      type="text" required placeholder="أدخل اسمك الكريم..."
+                      type="text" required placeholder="الاسم الكامل"
                       value={customer.name} onChange={e => setCustomer({...customer, name: e.target.value})}
-                      className="w-full p-3 rounded-xl border text-xs"
+                      className="w-full p-2.5 rounded-xl border text-xs"
                     />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-600 mb-1">رقم الهاتف (للتواصل وتأكيد الشحن)</label>
                     <input 
-                      type="tel" required placeholder="01xxxxxxxxx"
+                      type="tel" required placeholder="رقم الهاتف (للتواصل)"
                       value={customer.phone} onChange={e => setCustomer({...customer, phone: e.target.value})}
-                      className="w-full p-3 rounded-xl border text-xs"
+                      className="w-full p-2.5 rounded-xl border text-xs"
                     />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-600 mb-1">عنوان الاستلام بالتفصيل</label>
                     <textarea 
-                      required placeholder="المحافظة، المركز، الشارع..." rows="2"
+                      required placeholder="عنوان الاستلام بالتفصيل..." rows="2"
                       value={customer.address} onChange={e => setCustomer({...customer, address: e.target.value})}
-                      className="w-full p-3 rounded-xl border text-xs"
+                      className="w-full p-2.5 rounded-xl border text-xs"
                     ></textarea>
                   </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-600 mb-1">ملاحظات إضافية (اختياري)</label>
-                    <input 
-                      type="text" placeholder="أي تفاصيل خاصة بالطلب..."
-                      value={customer.notes} onChange={e => setCustomer({...customer, notes: e.target.value})}
-                      className="w-full p-3 rounded-xl border text-xs"
-                    />
+
+                  <div className="space-y-3 pt-3 border-t">
+                    <h3 className="font-bold text-xs text-slate-700">2. اختر طريقة الدفع الأونلاين</h3>
+                    
+                    <div className="grid grid-cols-1 gap-2">
+                      {settings.enableVodafone && (
+                        <label className={`p-3 border rounded-xl flex items-center justify-between cursor-pointer ${customer.paymentMethod === 'vodafone' ? 'border-amber-500 bg-amber-50' : 'bg-slate-50'}`}>
+                          <div className="flex items-center gap-2">
+                            <input 
+                              type="radio" name="payment" value="vodafone"
+                              checked={customer.paymentMethod === 'vodafone'}
+                              onChange={e => setCustomer({...customer, paymentMethod: e.target.value})}
+                            />
+                            <span className="text-xs font-bold text-slate-800">محفظة إلكترونية (فودافون كاش / أورنج / اتصالات)</span>
+                          </div>
+                          <span className="text-[10px] bg-red-100 text-red-700 px-2 py-0.5 rounded font-bold">كاش 📱</span>
+                        </label>
+                      )}
+
+                      {settings.enableVisa && (
+                        <label className={`p-3 border rounded-xl flex items-center justify-between cursor-pointer ${customer.paymentMethod === 'visa' ? 'border-amber-500 bg-amber-50' : 'bg-slate-50'}`}>
+                          <div className="flex items-center gap-2">
+                            <input 
+                              type="radio" name="payment" value="visa"
+                              checked={customer.paymentMethod === 'visa'}
+                              onChange={e => setCustomer({...customer, paymentMethod: e.target.value})}
+                            />
+                            <span className="text-xs font-bold text-slate-800">بطاقات الائتمان (فيزا / ماستركارد)</span>
+                          </div>
+                          <span className="text-[10px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded font-bold">Visa 💳</span>
+                        </label>
+                      )}
+
+                      {settings.enableCash && (
+                        <label className={`p-3 border rounded-xl flex items-center justify-between cursor-pointer ${customer.paymentMethod === 'cash' ? 'border-amber-500 bg-amber-50' : 'bg-slate-50'}`}>
+                          <div className="flex items-center gap-2">
+                            <input 
+                              type="radio" name="payment" value="cash"
+                              checked={customer.paymentMethod === 'cash'}
+                              onChange={e => setCustomer({...customer, paymentMethod: e.target.value})}
+                            />
+                            <span className="text-xs font-bold text-slate-800">الدفع نقداً عند الاستلام</span>
+                          </div>
+                          <span className="text-[10px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded font-bold">COD 💵</span>
+                        </label>
+                      )}
+                    </div>
+
+                    {/* تفاصيل التحويل للمحفظة */}
+                    {customer.paymentMethod === 'vodafone' && (
+                      <div className="p-3 bg-red-50 border border-red-200 rounded-xl space-y-2 text-xs text-red-900">
+                        <p className="font-bold">برجاء تحويل مبلغ <span className="text-base text-red-600">{totalPrice} ج.م</span> إلى رقم المحفظة التالي:</p>
+                        <div className="bg-white p-2 rounded-lg text-center font-black text-lg tracking-wider border border-red-300 select-all">
+                          {settings.walletNumber}
+                        </div>
+                        <input 
+                          type="text" required placeholder="أدخل رقم المحفظة المحول منها أو رقم عملية التحويل..."
+                          value={customer.transactionId} onChange={e => setCustomer({...customer, transactionId: e.target.value})}
+                          className="w-full p-2 rounded-lg border text-xs bg-white text-slate-800"
+                        />
+                      </div>
+                    )}
+
+                    {customer.paymentMethod === 'visa' && (
+                      <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl space-y-2 text-xs text-blue-900">
+                        <p className="font-bold">سيتم توجيهك لبوابة الدفع الإلكتروني الآمنة لإتمام خصم ({totalPrice} ج.م).</p>
+                        <input type="text" placeholder="رقم البطاقة (16 رقم)" className="w-full p-2 rounded-lg border text-xs bg-white" />
+                        <div className="grid grid-cols-2 gap-2">
+                          <input type="text" placeholder="MM/YY" className="p-2 rounded-lg border text-xs bg-white" />
+                          <input type="text" placeholder="CVV" className="p-2 rounded-lg border text-xs bg-white" />
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <div className="bg-slate-50 p-4 rounded-2xl border flex justify-between items-center text-sm font-black">
-                    <span>المطلوب دفعه عند الاستلام:</span>
+                    <span>إجمالي المبلغ المطلوب:</span>
                     <span className="text-amber-600">{totalPrice} ج.م</span>
                   </div>
 
@@ -366,7 +473,7 @@
                     type="submit"
                     className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-xl text-sm shadow-lg"
                   >
-                    تأكيد الطلب الآن 🚀
+                    تأكيد الطلب والدفع 🚀
                   </button>
                 </form>
               </div>
@@ -376,7 +483,7 @@
                   <div className="text-center py-8 space-y-4">
                     <div className="w-16 h-16 bg-amber-100 text-amber-600 rounded-2xl flex items-center justify-center mx-auto text-2xl">🔐</div>
                     <h2 className="text-xl font-bold">دخول لوحة تحكم المدير</h2>
-                    <p className="text-xs text-slate-400">كلمة السر الافتراضية: admin123</p>
+                    <p className="text-xs text-slate-400">كلمة السر الحالية: {settings.adminPassword}</p>
                     <input 
                       type="password"
                       placeholder="أدخل كلمة السر..."
@@ -386,7 +493,7 @@
                     />
                     <button 
                       onClick={() => {
-                        if (passInput === 'admin123') {
+                        if (passInput === settings.adminPassword) {
                           setIsAdmin(true);
                           showMsg('تم تسجيل الدخول بنجاح');
                         } else {
@@ -401,72 +508,166 @@
                 ) : (
                   <div className="space-y-6">
                     <div className="flex justify-between items-center border-b pb-3">
-                      <h2 className="font-bold text-lg text-slate-900">لوحة تحكم مكتب القزاز</h2>
+                      <h2 className="font-bold text-lg text-slate-900">لوحة التحكم الإدارية</h2>
                       <button onClick={() => setView('store')} className="text-xs text-amber-600 font-bold">العودة للمتجر 🛍️</button>
                     </div>
 
-                    <form onSubmit={handleAddProduct} className="space-y-3 bg-slate-50 p-4 rounded-2xl border">
-                      <h3 className="font-bold text-xs text-amber-700">إضافة منتج جديد سحابياً</h3>
-                      <input 
-                        type="text" placeholder="اسم المنتج" required
-                        value={newProd.name} onChange={e => setNewProd({...newProd, name: e.target.value})}
-                        className="w-full p-2.5 rounded-xl border text-xs"
-                      />
-                      <div className="grid grid-cols-2 gap-2">
-                        <input 
-                          type="number" placeholder="السعر (ج.م)" required
-                          value={newProd.price} onChange={e => setNewProd({...newProd, price: e.target.value})}
-                          className="w-full p-2.5 rounded-xl border text-xs"
-                        />
-                        <input 
-                          type="number" placeholder="المخزون"
-                          value={newProd.stock} onChange={e => setNewProd({...newProd, stock: e.target.value})}
-                          className="w-full p-2.5 rounded-xl border text-xs"
-                        />
-                      </div>
-                      <input 
-                        type="url" placeholder="رابط صورة المنتج (URL)"
-                        value={newProd.image} onChange={e => setNewProd({...newProd, image: e.target.value})}
-                        className="w-full p-2.5 rounded-xl border text-xs"
-                      />
-                      <textarea 
-                        placeholder="وصف المنتج..." rows="2"
-                        value={newProd.description} onChange={e => setNewProd({...newProd, description: e.target.value})}
-                        className="w-full p-2.5 rounded-xl border text-xs"
-                      ></textarea>
-                      <button type="submit" className="w-full bg-emerald-600 text-white font-bold py-2.5 rounded-xl text-xs shadow-md">
-                        نشر المنتج بالسحابة فوراً 🚀
+                    {/* تبويبات لوحة التحكم */}
+                    <div className="flex bg-slate-100 p-1 rounded-xl text-xs font-bold">
+                      <button 
+                        onClick={() => setAdminTab('products')} 
+                        className={`flex-1 py-2 rounded-lg transition-all ${adminTab === 'products' ? 'bg-white shadow-sm text-amber-600' : 'text-slate-500'}`}
+                      >
+                        📦 المنتجات ({products.length})
                       </button>
-                    </form>
+                      <button 
+                        onClick={() => setAdminTab('orders')} 
+                        className={`flex-1 py-2 rounded-lg transition-all ${adminTab === 'orders' ? 'bg-white shadow-sm text-amber-600' : 'text-slate-500'}`}
+                      >
+                        📋 الطلبات الواردة ({orders.length})
+                      </button>
+                      <button 
+                        onClick={() => setAdminTab('settings')} 
+                        className={`flex-1 py-2 rounded-lg transition-all ${adminTab === 'settings' ? 'bg-white shadow-sm text-amber-600' : 'text-slate-500'}`}
+                      >
+                        ⚙️ الإعدادات
+                      </button>
+                    </div>
 
-                    {/* قسم عرض طلبات العملاء */}
-                    <div className="space-y-3 pt-4 border-t">
-                      <h3 className="font-bold text-xs text-slate-900">طلبات العملاء الواردة ({orders.length}):</h3>
-                      {orders.length === 0 ? (
-                        <p className="text-xs text-slate-400">لا توجد طلبات جديدة حتى الآن.</p>
-                      ) : (
-                        orders.map(ord => (
-                          <div key={ord.id} className="bg-amber-50 p-3 rounded-xl border border-amber-200 text-xs space-y-1">
-                            <div className="flex justify-between font-bold text-slate-900">
-                              <span>{ord.customerName} ({ord.phone})</span>
-                              <span className="text-amber-700">{ord.total} ج.م</span>
-                            </div>
-                            <p className="text-slate-600">العنوان: {ord.address}</p>
-                            <p className="text-[10px] text-slate-400">التاريخ: {ord.date}</p>
+                    {/* تبويب إدارة المنتجات */}
+                    {adminTab === 'products' && (
+                      <div className="space-y-4">
+                        <form onSubmit={handleAddProduct} className="space-y-3 bg-slate-50 p-4 rounded-2xl border">
+                          <h3 className="font-bold text-xs text-amber-700">إضافة منتج جديد سحابياً</h3>
+                          <input 
+                            type="text" placeholder="اسم المنتج" required
+                            value={newProd.name} onChange={e => setNewProd({...newProd, name: e.target.value})}
+                            className="w-full p-2.5 rounded-xl border text-xs"
+                          />
+                          <div className="grid grid-cols-2 gap-2">
+                            <input 
+                              type="number" placeholder="السعر (ج.م)" required
+                              value={newProd.price} onChange={e => setNewProd({...newProd, price: e.target.value})}
+                              className="w-full p-2.5 rounded-xl border text-xs"
+                            />
+                            <input 
+                              type="number" placeholder="المخزون"
+                              value={newProd.stock} onChange={e => setNewProd({...newProd, stock: e.target.value})}
+                              className="w-full p-2.5 rounded-xl border text-xs"
+                            />
                           </div>
-                        ))
-                      )}
-                    </div>
+                          <input 
+                            type="url" placeholder="رابط صورة المنتج (URL)"
+                            value={newProd.image} onChange={e => setNewProd({...newProd, image: e.target.value})}
+                            className="w-full p-2.5 rounded-xl border text-xs"
+                          />
+                          <textarea 
+                            placeholder="وصف المنتج..." rows="2"
+                            value={newProd.description} onChange={e => setNewProd({...newProd, description: e.target.value})}
+                            className="w-full p-2.5 rounded-xl border text-xs"
+                          ></textarea>
+                          <button type="submit" className="w-full bg-emerald-600 text-white font-bold py-2.5 rounded-xl text-xs shadow-md">
+                            نشر المنتج بالسحابة فوراً 🚀
+                          </button>
+                        </form>
 
-                    <div className="space-y-2 pt-4 border-t">
-                      <h3 className="font-bold text-xs text-slate-600">إدارة المنتجات المسجلة ({products.length}):</h3>
-                      {products.map(p => (
-                        <div key={p.id} className="flex justify-between items-center bg-slate-50 p-2.5 rounded-xl border text-xs">
-                          <span className="font-bold">{p.name} - <span className="text-amber-600">{p.price} ج.م</span></span>
-                          <button onClick={() => handleDelete(p.id)} className="bg-red-100 text-red-600 px-2.5 py-1 rounded-lg font-bold">حذف</button>
+                        <div className="space-y-2">
+                          <h3 className="font-bold text-xs text-slate-600">المنتجات المسجلة:</h3>
+                          {products.map(p => (
+                            <div key={p.id} className="flex justify-between items-center bg-slate-50 p-2.5 rounded-xl border text-xs">
+                              <span className="font-bold">{p.name} - <span className="text-amber-600">{p.price} ج.م</span></span>
+                              <button onClick={() => handleDelete(p.id)} className="bg-red-100 text-red-600 px-2.5 py-1 rounded-lg font-bold">حذف</button>
+                            </div>
+                          ))}
                         </div>
-                      ))}
-                    </div>
+                      </div>
+                    )}
+
+                    {/* تبويب الطلبات */}
+                    {adminTab === 'orders' && (
+                      <div className="space-y-3">
+                        <h3 className="font-bold text-xs text-slate-900">طلبات العملاء الواردة ({orders.length}):</h3>
+                        {orders.length === 0 ? (
+                          <p className="text-xs text-slate-400">لا توجد طلبات جديدة حتى الآن.</p>
+                        ) : (
+                          orders.map(ord => (
+                            <div key={ord.id} className="bg-amber-50 p-3 rounded-xl border border-amber-200 text-xs space-y-1">
+                              <div className="flex justify-between font-bold text-slate-900">
+                                <span>{ord.customerName} ({ord.phone})</span>
+                                <span className="text-amber-700">{ord.total} ج.م</span>
+                              </div>
+                              <p className="text-slate-600">العنوان: {ord.address}</p>
+                              <p className="text-slate-600">طريقة الدفع: <span className="font-bold">{ord.paymentMethod}</span></p>
+                              {ord.transactionId !== 'N/A' && <p className="text-slate-600 font-bold">رقم تحويل المحفظة: {ord.transactionId}</p>}
+                              <p className="text-[10px] text-slate-400">التاريخ: {ord.date}</p>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    )}
+
+                    {/* تبويب إعدادات المتجر */}
+                    {adminTab === 'settings' && (
+                      <form onSubmit={handleSaveSettings} className="space-y-4 text-xs">
+                        <h3 className="font-bold text-sm text-slate-900 border-b pb-2">إعدادات المتجر والدفع</h3>
+                        
+                        <div>
+                          <label className="block font-bold text-slate-600 mb-1">اسم المتجر</label>
+                          <input 
+                            type="text" required
+                            value={settings.storeName} onChange={e => setSettings({...settings, storeName: e.target.value})}
+                            className="w-full p-2.5 rounded-xl border"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block font-bold text-slate-600 mb-1">رقم محفظة كاش للتلقي (فودافون/أورنج/اتصالات)</label>
+                          <input 
+                            type="text" required
+                            value={settings.walletNumber} onChange={e => setSettings({...settings, walletNumber: e.target.value})}
+                            className="w-full p-2.5 rounded-xl border font-mono font-bold"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block font-bold text-slate-600 mb-1">كلمة سر لوحة التحكم</label>
+                          <input 
+                            type="text" required
+                            value={settings.adminPassword} onChange={e => setSettings({...settings, adminPassword: e.target.value})}
+                            className="w-full p-2.5 rounded-xl border font-bold"
+                          />
+                        </div>
+
+                        <div className="space-y-2 border-t pt-3">
+                          <label className="block font-bold text-slate-700">تفعيل/إيقاف طرق الدفع للمشترين:</label>
+                          <label className="flex items-center gap-2">
+                            <input 
+                              type="checkbox" checked={settings.enableVodafone}
+                              onChange={e => setSettings({...settings, enableVodafone: e.target.checked})}
+                            />
+                            <span>تفعيل الدفع عبر المحافظ الإلكترونية (فودافون كاش...)</span>
+                          </label>
+                          <label className="flex items-center gap-2">
+                            <input 
+                              type="checkbox" checked={settings.enableVisa}
+                              onChange={e => setSettings({...settings, enableVisa: e.target.checked})}
+                            />
+                            <span>تفعيل الدفع عبر الفيซا والماستركارد (Visa)</span>
+                          </label>
+                          <label className="flex items-center gap-2">
+                            <input 
+                              type="checkbox" checked={settings.enableCash}
+                              onChange={e => setSettings({...settings, enableCash: e.target.checked})}
+                            />
+                            <span>تفعيل الدفع نقداً عند الاستلام (COD)</span>
+                          </label>
+                        </div>
+
+                        <button type="submit" className="w-full bg-emerald-600 text-white font-bold py-3 rounded-xl shadow-md text-xs">
+                          حفظ التغيرات بالإعدادات ⚙️
+                        </button>
+                      </form>
+                    )}
                   </div>
                 )}
               </div>
@@ -474,7 +675,7 @@
           </main>
           
           <footer className="mt-12 text-center text-[11px] text-slate-400">
-            جميع الحقوق محفوظة © مكتب القزاز للبرمجيات | El-Qazzaz Software Office
+            جميع الحقوق محفوظة © {settings.storeName} | El-Qazzaz Software Office
           </footer>
         </div>
       );
