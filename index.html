@@ -8,7 +8,6 @@
   <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <script src="https://unpkg.com/lucide@latest"></script>
 </head>
 <body class="bg-slate-50 font-sans text-slate-800">
   <div id="root"></div>
@@ -27,12 +26,16 @@
       measurementId: "G-GB1YM2MVP9"
     };
 
-    const app = initializeApp(firebaseConfig);
-    const db = getFirestore(app);
-
-    window.db = db;
-    window.firebaseFns = { collection, addDoc, deleteDoc, doc, onSnapshot };
-    window.dispatchEvent(new Event('firebase-ready'));
+    try {
+      const app = initializeApp(firebaseConfig);
+      const db = getFirestore(app);
+      window.db = db;
+      window.firebaseFns = { collection, addDoc, deleteDoc, doc, onSnapshot };
+      window.dispatchEvent(new Event('firebase-ready'));
+      console.log("Firebase Connected Successfully!");
+    } catch (error) {
+      alert("خطأ في اتصال فايربيس: " + error.message);
+    }
   </script>
 
   <script type="text/babel">
@@ -42,27 +45,30 @@
       const [cart, setCart] = React.useState([]);
       const [isAdmin, setIsAdmin] = React.useState(false);
       const [passInput, setPassInput] = React.useState('');
-      const [adminPassword, setAdminPassword] = React.useState('admin123');
       const [newProd, setNewProd] = React.useState({ name: '', price: '', stock: '', category: 'إلكترونيات', image: '', description: '' });
       const [toast, setToast] = React.useState(null);
       const [isDbReady, setIsDbReady] = React.useState(false);
 
       const showMsg = (msg) => {
         setToast(msg);
-        setTimeout(() => setToast(null), 3000);
+        setTimeout(() => setToast(null), 4000);
       };
 
       React.useEffect(() => {
         const handleReady = () => {
-          const db = window.db;
+          if (!window.db) return;
           const { collection, onSnapshot } = window.firebaseFns;
-
-          onSnapshot(collection(db, 'products'), (snapshot) => {
-            const prods = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-            setProducts(prods);
-          });
-
-          setIsDbReady(true);
+          try {
+            onSnapshot(collection(window.db, 'products'), (snapshot) => {
+              const prods = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+              setProducts(prods);
+              setIsDbReady(true);
+            }, (err) => {
+              showMsg("خطأ في قراءة القاعدة: " + err.message);
+            });
+          } catch(e) {
+            showMsg("خطأ تشغيل السحابة: " + e.message);
+          }
         };
 
         if (window.db) {
@@ -83,12 +89,13 @@
             stock: Number(newProd.stock || 10),
             category: newProd.category,
             image: newProd.image || 'https://images.unsplash.com/photo-1526170375885-4d8ecf77b99f?w=500&q=80',
-            description: newProd.description
+            description: newProd.description,
+            createdAt: new Date().toISOString()
           });
           setNewProd({ name: '', price: '', stock: '', category: 'إلكترونيات', image: '', description: '' });
-          showMsg('تم إضافة المنتج وتحديثه لحظياً على كافة الأجهزة!');
+          showMsg('تم الحفظ في السحابة بنجاح 🚀');
         } catch (err) {
-          showMsg('خطأ أثناء الحفظ بالسحابة');
+          alert('فشل الحفظ بسبب: ' + err.message);
         }
       };
 
@@ -103,7 +110,7 @@
       return (
         <div className="min-h-screen pb-16">
           {toast && (
-            <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-slate-900 text-white px-6 py-3 rounded-full text-xs font-bold shadow-2xl animate-bounce">
+            <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-slate-900 text-white px-6 py-3 rounded-full text-xs font-bold shadow-2xl">
               {toast}
             </div>
           )}
@@ -111,12 +118,12 @@
           <header className="bg-white border-b border-slate-200 sticky top-0 z-30 p-4 shadow-sm">
             <div className="max-w-6xl mx-auto flex justify-between items-center">
               <div>
-                <h1 className="font-bold text-slate-900 text-base md:text-lg">متجر مكتب القزاز للبرمجيات</h1>
-                <p className="text-[11px] text-amber-600 font-medium">مزامنة سحابية لحظية | Firebase v13</p>
+                <h1 className="font-bold text-slate-900 text-base">متجر مكتب القزاز للبرمجيات</h1>
+                <p className="text-[11px] text-emerald-600 font-medium">مزامنة سحابية لحظية 🟢</p>
               </div>
               <button 
                 onClick={() => setView(view === 'store' ? 'admin' : 'store')}
-                className="bg-slate-900 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-md hover:bg-slate-800"
+                className="bg-slate-900 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-md"
               >
                 {view === 'store' ? '🔒 لوحة التحكم' : '🛍️ العرض للمشتري'}
               </button>
@@ -125,47 +132,27 @@
 
           <main className="max-w-6xl mx-auto p-4 mt-4">
             {!isDbReady ? (
-              <div className="text-center py-20 text-slate-400 font-bold">جاري الاتصال بقاعدة بيانات السحابة...</div>
+              <div className="text-center py-20 text-slate-400 font-bold">جاري الاتصال بقاعدة البيانات...</div>
             ) : view === 'store' ? (
               <div>
-                <div className="flex justify-between items-center mb-6">
-                  <h2 className="text-xl font-black text-slate-900">المنتجات المتاحة أونلاين</h2>
-                  <span className="text-xs bg-emerald-100 text-emerald-800 px-3 py-1 rounded-full font-bold">متصل بالسحابة 🟢</span>
-                </div>
-
+                <h2 className="text-xl font-black text-slate-900 mb-4">المنتجات المتاحة أونلاين</h2>
                 {products.length === 0 ? (
-                  <div className="text-center py-16 bg-white rounded-3xl border border-slate-200 shadow-sm">
-                    <p className="text-sm text-slate-500 mb-3">لا توجد منتجات مسجلة في المتجر حالياً.</p>
-                    <button 
-                      onClick={() => setView('admin')}
-                      className="bg-amber-500 text-white px-5 py-2.5 rounded-xl text-xs font-bold shadow-md"
-                    >
-                      اضغط هنا لإضافة أول منتج عبر لوحة التحكم 🚀
-                    </button>
+                  <div className="text-center py-12 bg-white rounded-2xl border shadow-sm">
+                    <p className="text-xs text-slate-500 mb-3">لا توجد منتجات مسجلة حالياً بالسحابة.</p>
+                    <button onClick={() => setView('admin')} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-xs font-bold">إضافة أول منتج</button>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                     {products.map(p => (
-                      <div key={p.id} className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm hover:shadow-lg transition-all flex flex-col justify-between">
+                      <div key={p.id} className="bg-white rounded-2xl border p-4 shadow-sm flex flex-col justify-between">
                         <div>
-                          <img src={p.image} className="w-full h-48 object-cover" />
-                          <div className="p-4">
-                            <span className="text-[10px] bg-amber-50 text-amber-700 px-2.5 py-1 rounded-md font-bold">{p.category}</span>
-                            <h3 className="font-bold text-slate-900 text-base mt-2">{p.name}</h3>
-                            <p className="text-xs text-slate-500 mt-1 line-clamp-2">{p.description}</p>
-                          </div>
+                          <img src={p.image} className="w-full h-40 object-cover rounded-xl mb-3" />
+                          <h3 className="font-bold text-slate-900 text-sm">{p.name}</h3>
+                          <p className="text-xs text-slate-500 mt-1">{p.description}</p>
                         </div>
-                        <div className="p-4 pt-0 flex items-center justify-between border-t border-slate-100 mt-2">
-                          <span className="font-black text-amber-600 text-lg">{p.price} ج.م</span>
-                          <button 
-                            onClick={() => {
-                              setCart([...cart, p]);
-                              showMsg(`تمت إضافة ${p.name} للسلة`);
-                            }}
-                            className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-md"
-                          >
-                            إضافة للسلة ({cart.filter(i => i.id === p.id).length})
-                          </button>
+                        <div className="flex items-center justify-between border-t pt-3 mt-3">
+                          <span className="font-black text-amber-600 text-base">{p.price} ج.م</span>
+                          <button onClick={() => { setCart([...cart, p]); showMsg(`تمت إضافة ${p.name}`); }} className="bg-amber-500 text-white px-3 py-1.5 rounded-xl text-xs font-bold">إضافة للسلة</button>
                         </div>
                       </div>
                     ))}
@@ -173,80 +160,36 @@
                 )}
               </div>
             ) : (
-              <div className="max-w-xl mx-auto bg-white p-6 rounded-3xl border border-slate-200 shadow-xl">
+              <div className="max-w-md mx-auto bg-white p-6 rounded-3xl border shadow-xl">
                 {!isAdmin ? (
-                  <div className="text-center py-8 space-y-4">
-                    <div className="w-16 h-16 bg-amber-100 text-amber-600 rounded-2xl flex items-center justify-center mx-auto text-2xl">🔐</div>
-                    <h2 className="text-xl font-bold">دخول لوحة تحكم المدير</h2>
-                    <p className="text-xs text-slate-400">كلمة السر الافتراضية: admin123</p>
-                    <input 
-                      type="password"
-                      placeholder="أدخل كلمة السر..."
-                      value={passInput}
-                      onChange={e => setPassInput(e.target.value)}
-                      className="w-full px-4 py-3 rounded-xl border text-center font-bold text-lg"
-                    />
-                    <button 
-                      onClick={() => {
-                        if (passInput === adminPassword) {
-                          setIsAdmin(true);
-                          showMsg('تم الدخول بنجاح');
-                        } else {
-                          showMsg('كلمة السر خاطئة!');
-                        }
-                      }}
-                      className="w-full bg-amber-500 text-white font-bold py-3 rounded-xl shadow-lg"
-                    >
-                      تسجيل الدخول
-                    </button>
+                  <div className="text-center py-6 space-y-3">
+                    <h2 className="font-bold text-base">دخول لوحة تحكم المدير</h2>
+                    <p className="text-xs text-slate-400">كلمة السر: admin123</p>
+                    <input type="password" placeholder="أدخل كلمة السر" value={passInput} onChange={e => setPassInput(e.target.value)} className="w-full p-3 rounded-xl border text-center font-bold text-sm" />
+                    <button onClick={() => passInput === 'admin123' ? setIsAdmin(true) : showMsg('كلمة السر خاطئة')} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold text-xs">دخول</button>
                   </div>
                 ) : (
-                  <div className="space-y-6">
-                    <div className="flex justify-between items-center border-b pb-3">
-                      <h2 className="font-bold text-lg text-slate-900">إدارة منتجات المتجر السحابي</h2>
+                  <div className="space-y-4">
+                    <div className="flex justify-between items-center border-b pb-2">
+                      <h2 className="font-bold text-sm">إضافة منتج سحابي جديد</h2>
                       <button onClick={() => setView('store')} className="text-xs text-amber-600 font-bold">العودة للمتجر</button>
                     </div>
-
-                    <form onSubmit={handleAddProduct} className="space-y-3 bg-slate-50 p-4 rounded-2xl border">
-                      <h3 className="font-bold text-xs text-amber-700">إضافة منتج جديد يظهر فوراً على كل الأجهزة</h3>
-                      <input 
-                        type="text" placeholder="اسم المنتج" required
-                        value={newProd.name} onChange={e => setNewProd({...newProd, name: e.target.value})}
-                        className="w-full p-2.5 rounded-xl border text-xs"
-                      />
+                    <form onSubmit={handleAddProduct} className="space-y-3">
+                      <input type="text" placeholder="اسم المنتج" required value={newProd.name} onChange={e => setNewProd({...newProd, name: e.target.value})} className="w-full p-2.5 rounded-xl border text-xs" />
                       <div className="grid grid-cols-2 gap-2">
-                        <input 
-                          type="number" placeholder="السعر (ج.م)" required
-                          value={newProd.price} onChange={e => setNewProd({...newProd, price: e.target.value})}
-                          className="w-full p-2.5 rounded-xl border text-xs"
-                        />
-                        <input 
-                          type="number" placeholder="المخزون"
-                          value={newProd.stock} onChange={e => setNewProd({...newProd, stock: e.target.value})}
-                          className="w-full p-2.5 rounded-xl border text-xs"
-                        />
+                        <input type="number" placeholder="السعر (ج.م)" required value={newProd.price} onChange={e => setNewProd({...newProd, price: e.target.value})} className="w-full p-2.5 rounded-xl border text-xs" />
+                        <input type="number" placeholder="المخزون" value={newProd.stock} onChange={e => setNewProd({...newProd, stock: e.target.value})} className="w-full p-2.5 rounded-xl border text-xs" />
                       </div>
-                      <input 
-                        type="url" placeholder="رابط صورة المنتج (URL)"
-                        value={newProd.image} onChange={e => setNewProd({...newProd, image: e.target.value})}
-                        className="w-full p-2.5 rounded-xl border text-xs"
-                      />
-                      <textarea 
-                        placeholder="وصف المنتج..." rows="2"
-                        value={newProd.description} onChange={e => setNewProd({...newProd, description: e.target.value})}
-                        className="w-full p-2.5 rounded-xl border text-xs"
-                      ></textarea>
-                      <button type="submit" className="w-full bg-emerald-600 text-white font-bold py-2.5 rounded-xl text-xs shadow-md">
-                        نشر المنتج بالسحابة فوراً 🚀
-                      </button>
+                      <input type="url" placeholder="رابط الصورة (URL)" value={newProd.image} onChange={e => setNewProd({...newProd, image: e.target.value})} className="w-full p-2.5 rounded-xl border text-xs" />
+                      <textarea placeholder="وصف المنتج" rows="2" value={newProd.description} onChange={e => setNewProd({...newProd, description: e.target.value})} className="w-full p-2.5 rounded-xl border text-xs"></textarea>
+                      <button type="submit" className="w-full bg-emerald-600 text-white font-bold py-2.5 rounded-xl text-xs shadow-md">نشر بالسحابة فوراً 🚀</button>
                     </form>
-
-                    <div className="space-y-2">
-                      <h3 className="font-bold text-xs text-slate-600">المنتجات الحالية المسجلة سحابياً:</h3>
+                    <div className="space-y-2 mt-4 pt-4 border-t">
+                      <h3 className="font-bold text-xs text-slate-600">المنتجات الحالية:</h3>
                       {products.map(p => (
-                        <div key={p.id} className="flex justify-between items-center bg-slate-50 p-3 rounded-xl border text-xs">
-                          <span className="font-bold">{p.name} - <span className="text-amber-600">{p.price} ج.م</span></span>
-                          <button onClick={() => handleDelete(p.id)} className="bg-red-100 text-red-600 px-3 py-1 rounded-lg font-bold">حذف</button>
+                        <div key={p.id} className="flex justify-between items-center bg-slate-50 p-2.5 rounded-xl border text-xs">
+                          <span>{p.name} ({p.price} ج.م)</span>
+                          <button onClick={() => handleDelete(p.id)} className="bg-red-100 text-red-600 px-2 py-1 rounded-lg font-bold">حذف</button>
                         </div>
                       ))}
                     </div>
@@ -255,9 +198,8 @@
               </div>
             )}
           </main>
-          
-          <footer className="mt-12 text-center text-[11px] text-slate-400">
-            جميع الحقوق محفوظة © مكتب القزاز للبرمجيات | El-Qazzaz Software Office
+          <footer className="mt-12 text-center text-[10px] text-slate-400">
+            جميع الحقوق محفوظة © مكتب القزاز للبرمجيات
           </footer>
         </div>
       );
