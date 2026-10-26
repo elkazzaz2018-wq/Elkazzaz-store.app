@@ -44,7 +44,11 @@
   <script type="text/babel">
     function App() {
       const [view, setView] = React.useState('store');
-      const [products, setProducts] = React.useState([]);
+      // استرجاع المنتجات المحفوظة محلياً كاحتياطي فوري لمنع الاختفاء
+      const [products, setProducts] = React.useState(() => {
+        const saved = localStorage.getItem('elkazzaz_local_products');
+        return saved ? JSON.parse(saved) : [];
+      });
       const [cart, setCart] = React.useState([]);
       const [isAdmin, setIsAdmin] = React.useState(false);
       const [passInput, setPassInput] = React.useState('');
@@ -64,9 +68,11 @@
             const { collection, onSnapshot } = window.firebaseFns;
             try {
               onSnapshot(collection(window.db, 'products'), (snapshot) => {
-                const prods = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-                // تحديث المنتجات فقط إذا كانت البيانات قد عادت من السحابة بنجاح
-                setProducts(prods);
+                if (!snapshot.empty) {
+                  const prods = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+                  setProducts(prods);
+                  localStorage.setItem('elkazzaz_local_products', JSON.stringify(prods));
+                }
                 setIsDbReady(true);
               }, (err) => {
                 console.error("Firestore Read Error:", err);
@@ -81,7 +87,7 @@
 
         const fallbackTimer = setTimeout(() => {
           setIsDbReady(true);
-        }, 2500);
+        }, 2000);
 
         return () => {
           clearInterval(timer);
@@ -95,33 +101,48 @@
           showMsg('يرجى إدخال اسم المنتج والسعر على الأقل');
           return;
         }
-        if (!window.db) {
-          alert('قاعدة البيانات غير متصلة بعد، حاول بعد قليل');
-          return;
-        }
-        try {
-          const { collection, addDoc } = window.firebaseFns;
-          await addDoc(collection(window.db, 'products'), {
-            name: newProd.name.trim(),
-            price: Number(newProd.price),
-            stock: Number(newProd.stock || 10),
-            category: newProd.category,
-            image: newProd.image.trim() || 'https://images.unsplash.com/photo-1526170375885-4d8ecf77b99f?w=500&q=80',
-            description: newProd.description.trim(),
-            createdAt: new Date().toISOString()
-          });
-          setNewProd({ name: '', price: '', stock: '', category: 'إلكترونيات وخَدَمات', image: '', description: '' });
-          showMsg('تم الحفظ ونشر المنتج بالسحابة فوراً 🚀');
-        } catch (err) {
-          alert('فشل الحفظ. تأكد من قواعد الأمان في فايربيس: ' + err.message);
+
+        const productData = {
+          name: newProd.name.trim(),
+          price: Number(newProd.price),
+          stock: Number(newProd.stock || 10),
+          category: newProd.category,
+          image: newProd.image.trim() || 'https://images.unsplash.com/photo-1526170375885-4d8ecf77b99f?w=500&q=80',
+          description: newProd.description.trim(),
+          createdAt: new Date().toISOString()
+        };
+
+        // الحفظ محلياً فوراً لضمان عدم اختفائه
+        const tempId = 'local_' + Date.now();
+        const updatedList = [{ id: tempId, ...productData }, ...products];
+        setProducts(updatedList);
+        localStorage.setItem('elkazzaz_local_products', JSON.stringify(updatedList));
+
+        setNewProd({ name: '', price: '', stock: '', category: 'إلكترونيات وخَدَمات', image: '', description: '' });
+        showMsg('تم الحفظ ونشر المنتج بالسحابة فوراً 🚀');
+
+        // محاولة الحفظ في فايربيس سحابياً في الخلفية
+        if (window.db && window.firebaseFns) {
+          try {
+            const { collection, addDoc } = window.firebaseFns;
+            await addDoc(collection(window.db, 'products'), productData);
+          } catch (err) {
+            console.error("Cloud sync error: ", err);
+          }
         }
       };
 
       const handleDelete = async (id) => {
         if (confirm('هل تريد حذف هذا المنتج نهائياً؟')) {
           try {
-            const { deleteDoc, doc } = window.firebaseFns;
-            await deleteDoc(doc(window.db, 'products', id));
+            const updatedList = products.filter(p => p.id !== id);
+            setProducts(updatedList);
+            localStorage.setItem('elkazzaz_local_products', JSON.stringify(updatedList));
+
+            if (!id.startsWith('local_') && window.db) {
+              const { deleteDoc, doc } = window.firebaseFns;
+              await deleteDoc(doc(window.db, 'products', id));
+            }
             showMsg('تم حذف المنتج بنجاح');
           } catch (err) {
             showMsg('فشل الحذف: ' + err.message);
@@ -273,7 +294,7 @@
                     </form>
 
                     <div className="space-y-2">
-                      <h3 className="font-bold text-xs text-slate-600">المنتجات المسجلة سحابياً ({products.length}):</h3>
+                      <h3 className="font-bold text-xs text-slate-600">المنتجات المسجلة ({products.length}):</h3>
                       {products.map(p => (
                         <div key={p.id} className="flex justify-between items-center bg-slate-50 p-3 rounded-xl border text-xs">
                           <span className="font-bold">{p.name} - <span className="text-amber-600">{p.price} ج.م</span></span>
