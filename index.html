@@ -57,7 +57,6 @@
         setTimeout(() => setToast(null), 3500);
       };
 
-      // التحقق الفوري من جاهزية قاعدة البيانات دون انتظار أحداث معقدة
       React.useEffect(() => {
         const timer = setInterval(() => {
           if (window.isFirebaseInitialized && window.db) {
@@ -66,11 +65,12 @@
             try {
               onSnapshot(collection(window.db, 'products'), (snapshot) => {
                 const prods = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+                // تحديث المنتجات فقط إذا كانت البيانات قد عادت من السحابة بنجاح
                 setProducts(prods);
                 setIsDbReady(true);
               }, (err) => {
                 console.error("Firestore Read Error:", err);
-                setIsDbReady(true); // السماح بفتح المتجر حتى لو القاعدة فارغة
+                setIsDbReady(true);
               });
             } catch(e) {
               console.error("Snapshot Error:", e);
@@ -79,10 +79,9 @@
           }
         }, 200);
 
-        // حد أقصى للانتظار ثانتين لفتح الواجهة فوراً مهما كانت الظروف
         const fallbackTimer = setTimeout(() => {
           setIsDbReady(true);
-        }, 2000);
+        }, 2500);
 
         return () => {
           clearInterval(timer);
