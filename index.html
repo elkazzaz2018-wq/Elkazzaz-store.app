@@ -15,7 +15,7 @@
 <body class="bg-slate-50 font-sans text-slate-800">
   <div id="root"></div>
 
-  <!-- الاتصال المباشر والمجبر بـ Firebase v13 -->
+  <!-- الاتصال المباشر والمحدد بقاعدة البيانات الافتراضية في Firebase v13 -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/13.1.0/firebase-app.js";
     import { getFirestore, collection, addDoc, deleteDoc, doc, onSnapshot, setDoc } from "https://www.gstatic.com/firebasejs/13.1.0/firebase-firestore.js";
@@ -32,14 +32,15 @@
 
     try {
       const app = initializeApp(firebaseConfig);
-      const db = getFirestore(app);
+      // تحديد قاعدة البيانات الافتراضية (default) بصراحة لضمان المطابقة
+      const db = getFirestore(app, "(default)");
       window.db = db;
       window.firebaseFns = { collection, addDoc, deleteDoc, doc, onSnapshot, setDoc };
       window.isFirebaseInitialized = true;
-      console.log("Firebase initialized successfully.");
+      console.log("Firebase initialized successfully with default DB.");
     } catch (error) {
       console.error("Firebase Init Error:", error);
-      window.firebaseError = error.message;
+      alert("خطأ في تهيئة الاتصال بقاعدة البيانات: " + error.message);
     }
   </script>
 
@@ -84,21 +85,21 @@
               setCloudStatus('متصل بالسحابة 🟢');
               setIsDbReady(true);
               
-              // جلب المنتجات سحابياً بشكل مباشر
+              // الاستماع المباشر للمنتجات سحابياً
               onSnapshot(collection(window.db, 'products'), (snapshot) => {
                 const prods = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
                 setProducts(prods);
               }, (err) => {
-                console.error("Firestore error:", err);
+                console.error("Firestore read products error:", err);
               });
 
-              // جلب الطلبات سحابياً
+              // الاستماع للطلبات سحابياً
               onSnapshot(collection(window.db, 'orders'), (snapshot) => {
                 const ords = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
                 setOrders(ords);
               });
 
-              // جلب الإعدادات سحابياً
+              // الاستماع للإعدادات سحابياً
               onSnapshot(doc(window.db, 'settings', 'general'), (docSnap) => {
                 if (docSnap.exists()) {
                   setSettings(docSnap.data());
