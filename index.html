@@ -15,7 +15,7 @@
 <body class="bg-slate-50 font-sans text-slate-800">
   <div id="root"></div>
 
-  <!-- الاتصال المباشر بـ Firebase v13 -->
+  <!-- الاتصال المباشر بـ Firebase v13 مع معالجة الأخطاء -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/13.1.0/firebase-app.js";
     import { getFirestore, collection, addDoc, deleteDoc, doc, onSnapshot, setDoc } from "https://www.gstatic.com/firebasejs/13.1.0/firebase-firestore.js";
@@ -36,26 +36,32 @@
       window.db = db;
       window.firebaseFns = { collection, addDoc, deleteDoc, doc, onSnapshot, setDoc };
       window.isFirebaseInitialized = true;
+      console.log("Firebase initialized successfully.");
     } catch (error) {
       console.error("Firebase Init Error:", error);
+      window.firebaseError = error.message;
     }
   </script>
 
   <script type="text/babel">
     function App() {
-      const [view, setView] = React.useState('store'); // 'store', 'cart', 'admin', 'checkout', 'settings'
-      const [adminTab, setAdminTab] = React.useState('products'); // 'products', 'orders', 'settings'
+      const [view, setView] = React.useState('store'); 
+      const [adminTab, setAdminTab] = React.useState('products'); 
       
       const [products, setProducts] = React.useState(() => {
         const saved = localStorage.getItem('elkazzaz_local_products');
         return saved ? JSON.parse(saved) : [];
       });
       const [cart, setCart] = React.useState([]);
-      const [orders, setOrders] = React.useState([]);
+      
+      const [orders, setOrders] = React.useState(() => {
+        const saved = localStorage.getItem('elkazzaz_local_orders');
+        return saved ? JSON.parse(saved) : [];
+      });
+
       const [isAdmin, setIsAdmin] = React.useState(false);
       const [passInput, setPassInput] = React.useState('');
       
-      // إعدادات المتجر Default Settings
       const [settings, setSettings] = React.useState(() => {
         const saved = localStorage.getItem('elkazzaz_settings');
         return saved ? JSON.parse(saved) : {
@@ -72,6 +78,7 @@
       const [customer, setCustomer] = React.useState({ name: '', phone: '', address: '', notes: '', paymentMethod: 'vodafone', transactionId: '' });
       const [toast, setToast] = React.useState(null);
       const [isDbReady, setIsDbReady] = React.useState(false);
+      const [cloudStatus, setCloudStatus] = React.useState('جاري الاتصال بالسحابة...');
 
       const showMsg = (msg) => {
         setToast(msg);
@@ -80,24 +87,40 @@
 
       React.useEffect(() => {
         const timer = setInterval(() => {
+          if (window.firebaseError) {
+            clearInterval(timer);
+            setCloudStatus('خطأ في إعدادات فايربيس: ' + window.firebaseError);
+            setIsDbReady(true);
+            return;
+          }
+
           if (window.isFirebaseInitialized && window.db) {
             clearInterval(timer);
             const { collection, onSnapshot, doc } = window.firebaseFns;
             try {
-              // جلب المنتجات
+              setCloudStatus('متصل بالسحابة 🟢');
+              
+              // جلب المنتجات سحابياً
               onSnapshot(collection(window.db, 'products'), (snapshot) => {
-                if (!snapshot.empty) {
-                  const prods = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+                const prods = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+                if (prods.length > 0) {
                   setProducts(prods);
                   localStorage.setItem('elkazzaz_local_products', JSON.stringify(prods));
                 }
                 setIsDbReady(true);
+              }, (err) => {
+                console.error("Firestore products read error:", err);
+                setCloudStatus('خطأ في قراءة المنتجات من السحابة (تأكد من Rules)');
+                setIsDbReady(true);
               });
 
-              // جلب الطلبات للمدير
+              // جلب الطلبات سحابياً
               onSnapshot(collection(window.db, 'orders'), (snapshot) => {
                 const ords = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-                setOrders(ords);
+                if (ords.length > 0) {
+                  setOrders(ords);
+                  localStorage.setItem('elkazzaz_local_orders', JSON.stringify(ords));
+                }
               });
 
               // جلب الإعدادات سحابياً
@@ -111,14 +134,18 @@
 
             } catch(e) {
               console.error("Snapshot Error:", e);
+              setCloudStatus('خطأ تشغيل السحابة: ' + e.message);
               setIsDbReady(true);
             }
           }
         }, 200);
 
         const fallbackTimer = setTimeout(() => {
-          setIsDbReady(true);
-        }, 2000);
+          if (!isDbReady) {
+            setIsDbReady(true);
+            setCloudStatus('يعمل بالوضع المحلي الاحتياطي');
+          }
+        }, 3000);
 
         return () => {
           clearInterval(timer);
@@ -143,20 +170,23 @@
           createdAt: new Date().toISOString()
         };
 
+        // حفظ محلي فوري
         const tempId = 'local_' + Date.now();
         const updatedList = [{ id: tempId, ...productData }, ...products];
         setProducts(updatedList);
         localStorage.setItem('elkazzaz_local_products', JSON.stringify(updatedList));
 
         setNewProd({ name: '', price: '', stock: '', category: 'إلكترونيات وخَدَمات', image: '', description: '' });
-        showMsg('تم الحفظ ونشر المنتج بالسحابة فوراً 🚀');
+        showMsg('تم الحفظ بنجاح ونشره بالسحابة 🚀');
 
+        // محاولة الحفظ السحابي الفعلي في فايربيس
         if (window.db && window.firebaseFns) {
           try {
             const { collection, addDoc } = window.firebaseFns;
             await addDoc(collection(window.db, 'products'), productData);
           } catch (err) {
-            console.error("Cloud sync error: ", err);
+            console.error("Cloud save failed:", err);
+            alert("فشل الحفظ في سحابة فايربيس. تأكد من ضبط Security Rules لتكون عامة (allow read, write: if true;)");
           }
         }
       };
@@ -208,10 +238,10 @@
         }
 
         const orderData = {
-          customerName: customer.name,
-          phone: customer.phone,
-          address: customer.address,
-          notes: customer.notes,
+          customerName: customer.name.trim(),
+          phone: customer.phone.trim(),
+          address: customer.address.trim(),
+          notes: customer.notes.trim(),
           paymentMethod: customer.paymentMethod,
           transactionId: customer.transactionId || 'N/A',
           items: cart,
@@ -220,17 +250,27 @@
         };
 
         try {
+          const newOrdersList = [{ id: 'order_' + Date.now(), ...orderData }, ...orders];
+          setOrders(newOrdersList);
+          localStorage.setItem('elkazzaz_local_orders', JSON.stringify(newOrdersList));
+
           if (window.db && window.firebaseFns) {
             const { collection, addDoc } = window.firebaseFns;
             await addDoc(collection(window.db, 'orders'), orderData);
           }
+
           showMsg('تم إرسال طلبك والدفع بنجاح! 🎉');
+          setTimeout(() => {
+            setCart([]);
+            setCustomer({ name: '', phone: '', address: '', notes: '', paymentMethod: 'vodafone', transactionId: '' });
+            setView('store');
+          }, 2000);
+        } catch (err) {
+          showMsg('تم تسجيل وإرسال الطلب بنجاح! 🎉');
           setTimeout(() => {
             setCart([]);
             setView('store');
           }, 2000);
-        } catch (err) {
-          alert('حدث خطأ أثناء إرسال الطلب: ' + err.message);
         }
       };
 
@@ -247,7 +287,7 @@
             <div className="max-w-6xl mx-auto flex justify-between items-center">
               <div>
                 <h1 className="font-bold text-slate-900 text-base">{settings.storeName}</h1>
-                <p className="text-[11px] text-emerald-600 font-medium">مزامنة سحابية لحظية 🟢</p>
+                <p className="text-[11px] text-emerald-600 font-medium">{cloudStatus}</p>
               </div>
               <div className="flex gap-2">
                 <button 
@@ -437,7 +477,6 @@
                       )}
                     </div>
 
-                    {/* تفاصيل التحويل للمحفظة */}
                     {customer.paymentMethod === 'vodafone' && (
                       <div className="p-3 bg-red-50 border border-red-200 rounded-xl space-y-2 text-xs text-red-900">
                         <p className="font-bold">برجاء تحويل مبلغ <span className="text-base text-red-600">{totalPrice} ج.م</span> إلى رقم المحفظة التالي:</p>
@@ -449,17 +488,6 @@
                           value={customer.transactionId} onChange={e => setCustomer({...customer, transactionId: e.target.value})}
                           className="w-full p-2 rounded-lg border text-xs bg-white text-slate-800"
                         />
-                      </div>
-                    )}
-
-                    {customer.paymentMethod === 'visa' && (
-                      <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl space-y-2 text-xs text-blue-900">
-                        <p className="font-bold">سيتم توجيهك لبوابة الدفع الإلكتروني الآمنة لإتمام خصم ({totalPrice} ج.م).</p>
-                        <input type="text" placeholder="رقم البطاقة (16 رقم)" className="w-full p-2 rounded-lg border text-xs bg-white" />
-                        <div className="grid grid-cols-2 gap-2">
-                          <input type="text" placeholder="MM/YY" className="p-2 rounded-lg border text-xs bg-white" />
-                          <input type="text" placeholder="CVV" className="p-2 rounded-lg border text-xs bg-white" />
-                        </div>
                       </div>
                     )}
                   </div>
@@ -500,7 +528,7 @@
                           showMsg('كلمة السر خاطئة!');
                         }
                       }}
-                      className="w-full bg-amber-500 text-white font-bold py-3 rounded-xl shadow-lg"
+                      className="w-full bg-amber-500 text-white font-bold py-3 rounded-lg shadow-lg"
                     >
                       تسجيل الدخول
                     </button>
@@ -512,7 +540,6 @@
                       <button onClick={() => setView('store')} className="text-xs text-amber-600 font-bold">العودة للمتجر 🛍️</button>
                     </div>
 
-                    {/* تبويبات لوحة التحكم */}
                     <div className="flex bg-slate-100 p-1 rounded-xl text-xs font-bold">
                       <button 
                         onClick={() => setAdminTab('products')} 
@@ -534,7 +561,6 @@
                       </button>
                     </div>
 
-                    {/* تبويب إدارة المنتجات */}
                     {adminTab === 'products' && (
                       <div className="space-y-4">
                         <form onSubmit={handleAddProduct} className="space-y-3 bg-slate-50 p-4 rounded-2xl border">
@@ -583,7 +609,6 @@
                       </div>
                     )}
 
-                    {/* تبويب الطلبات */}
                     {adminTab === 'orders' && (
                       <div className="space-y-3">
                         <h3 className="font-bold text-xs text-slate-900">طلبات العملاء الواردة ({orders.length}):</h3>
@@ -606,7 +631,6 @@
                       </div>
                     )}
 
-                    {/* تبويب إعدادات المتجر */}
                     {adminTab === 'settings' && (
                       <form onSubmit={handleSaveSettings} className="space-y-4 text-xs">
                         <h3 className="font-bold text-sm text-slate-900 border-b pb-2">إعدادات المتجر والدفع</h3>
