@@ -15,39 +15,13 @@
 <body class="bg-slate-50 font-sans text-slate-800">
   <div id="root"></div>
 
-  <!-- الاتصال المباشر والمحدد بقاعدة البيانات الافتراضية في Firebase v13 -->
-  <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/13.1.0/firebase-app.js";
-    import { getFirestore, collection, addDoc, deleteDoc, doc, onSnapshot, setDoc } from "https://www.gstatic.com/firebasejs/13.1.0/firebase-firestore.js";
-
-    const firebaseConfig = {
-      apiKey: "AIzaSyAz4Vu2-04TRBOz4OaQy9Bq7XEge08hNfo",
-      authDomain: "elkazzaz-store.firebaseapp.com",
-      projectId: "elkazzaz-store",
-      storageBucket: "elkazzaz-store.firebasestorage.app",
-      messagingSenderId: "383296417502",
-      appId: "1:383296417502:web:6de10a7f513b8148a81c4f",
-      measurementId: "G-GB1YM2MVP9"
-    };
-
-    try {
-      const app = initializeApp(firebaseConfig);
-      // تحديد قاعدة البيانات الافتراضية (default) بصراحة لضمان المطابقة
-      const db = getFirestore(app, "(default)");
-      window.db = db;
-      window.firebaseFns = { collection, addDoc, deleteDoc, doc, onSnapshot, setDoc };
-      window.isFirebaseInitialized = true;
-      console.log("Firebase initialized successfully with default DB.");
-    } catch (error) {
-      console.error("Firebase Init Error:", error);
-      alert("خطأ في تهيئة الاتصال بقاعدة البيانات: " + error.message);
-    }
-  </script>
-
   <script type="text/babel">
+    // رابط Google Apps Script الخاص بك متضمن في الكود مباشرة
+    const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwVB5VDKe7ONxDDIJy8bHOfkctYk2wpfSX54yh3DVLr7twkImXZVkGqjbSTNdc13Knc/exec";
+
     function App() {
-      const [view, setView] = React.useState('store'); 
-      const [adminTab, setAdminTab] = React.useState('products'); 
+      const [view, setView] = React.useState('store');
+      const [adminTab, setAdminTab] = React.useState('products');
       
       const [products, setProducts] = React.useState([]);
       const [cart, setCart] = React.useState([]);
@@ -68,60 +42,32 @@
       const [newProd, setNewProd] = React.useState({ name: '', price: '', stock: '', category: 'إلكترونيات وخَدَمات', image: '', description: '' });
       const [customer, setCustomer] = React.useState({ name: '', phone: '', address: '', notes: '', paymentMethod: 'vodafone', transactionId: '' });
       const [toast, setToast] = React.useState(null);
-      const [isDbReady, setIsDbReady] = React.useState(false);
-      const [cloudStatus, setCloudStatus] = React.useState('جاري الاتصال بالسحابة...');
+      const [loading, setLoading] = React.useState(true);
+      const [isSyncing, setIsSyncing] = React.useState(false);
 
       const showMsg = (msg) => {
         setToast(msg);
         setTimeout(() => setToast(null), 3500);
       };
 
+      const loadDataFromSheet = async () => {
+        try {
+          const resProd = await fetch(`${SCRIPT_URL}?action=getProducts`);
+          const dataProd = await resProd.json();
+          if (dataProd.products) setProducts(dataProd.products);
+
+          const resOrd = await fetch(`${SCRIPT_URL}?action=getOrders`);
+          const dataOrd = await resOrd.json();
+          if (dataOrd.orders) setOrders(dataOrd.orders);
+        } catch (err) {
+          console.error("Error loading data:", err);
+        } finally {
+          setLoading(false);
+        }
+      };
+
       React.useEffect(() => {
-        const timer = setInterval(() => {
-          if (window.isFirebaseInitialized && window.db) {
-            clearInterval(timer);
-            const { collection, onSnapshot, doc } = window.firebaseFns;
-            try {
-              setCloudStatus('متصل بالسحابة 🟢');
-              setIsDbReady(true);
-              
-              // الاستماع المباشر للمنتجات سحابياً
-              onSnapshot(collection(window.db, 'products'), (snapshot) => {
-                const prods = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-                setProducts(prods);
-              }, (err) => {
-                console.error("Firestore read products error:", err);
-              });
-
-              // الاستماع للطلبات سحابياً
-              onSnapshot(collection(window.db, 'orders'), (snapshot) => {
-                const ords = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-                setOrders(ords);
-              });
-
-              // الاستماع للإعدادات سحابياً
-              onSnapshot(doc(window.db, 'settings', 'general'), (docSnap) => {
-                if (docSnap.exists()) {
-                  setSettings(docSnap.data());
-                }
-              });
-
-            } catch(e) {
-              console.error("Snapshot Error:", e);
-              setCloudStatus('خطأ بالسحابة');
-              setIsDbReady(true);
-            }
-          }
-        }, 200);
-
-        const fallbackTimer = setTimeout(() => {
-          setIsDbReady(true);
-        }, 2500);
-
-        return () => {
-          clearInterval(timer);
-          clearTimeout(fallbackTimer);
-        };
+        loadDataFromSheet();
       }, []);
 
       const handleAddProduct = async (e) => {
@@ -131,6 +77,7 @@
           return;
         }
 
+        setIsSyncing(true);
         const productData = {
           name: newProd.name.trim(),
           price: Number(newProd.price),
@@ -142,43 +89,35 @@
         };
 
         try {
-          if (window.db && window.firebaseFns) {
-            const { collection, addDoc } = window.firebaseFns;
-            await addDoc(collection(window.db, 'products'), productData);
-            setNewProd({ name: '', price: '', stock: '', category: 'إلكترونيات وخَدَمات', image: '', description: '' });
-            showMsg('تم الحفظ في السحابة بنجاح 🚀');
-          } else {
-            alert('قاعدة البيانات غير متصلة بالسحابة حالياً!');
-          }
+          await fetch(SCRIPT_URL, {
+            method: 'POST',
+            body: JSON.stringify({ action: 'addProduct', product: productData })
+          });
+          setNewProd({ name: '', price: '', stock: '', category: 'إلكترونيات وخَدَمات', image: '', description: '' });
+          showMsg('تم الحفظ في Google Sheets بنجاح 🚀');
+          await loadDataFromSheet();
         } catch (err) {
-          alert('فشل الحفظ بالسحابة: ' + err.message);
+          showMsg('فشل الحفظ: ' + err.message);
+        } finally {
+          setIsSyncing(false);
         }
       };
 
       const handleDelete = async (id) => {
-        if (confirm('هل تريد حذف هذا المنتج نهائياً من السحابة؟')) {
+        if (confirm('هل تريد حذف هذا المنتج نهائياً من Google Sheets؟')) {
+          setIsSyncing(true);
           try {
-            if (window.db && window.firebaseFns) {
-              const { deleteDoc, doc } = window.firebaseFns;
-              await deleteDoc(doc(window.db, 'products', id));
-              showMsg('تم الحذف من السحابة بنجاح');
-            }
+            await fetch(SCRIPT_URL, {
+              method: 'POST',
+              body: JSON.stringify({ action: 'deleteProduct', id: id })
+            });
+            showMsg('تم الحذف بنجاح');
+            await loadDataFromSheet();
           } catch (err) {
             showMsg('فشل الحذف: ' + err.message);
+          } finally {
+            setIsSyncing(false);
           }
-        }
-      };
-
-      const handleSaveSettings = async (e) => {
-        e.preventDefault();
-        try {
-          if (window.db && window.firebaseFns) {
-            const { doc, setDoc } = window.firebaseFns;
-            await setDoc(doc(window.db, 'settings', 'general'), settings);
-            showMsg('تم حفظ الإعدادات في السحابة بنجاح ⚙️');
-          }
-        } catch (err) {
-          alert('فشل حفظ الإعدادات: ' + err.message);
         }
       };
 
@@ -196,6 +135,7 @@
           return;
         }
 
+        setIsSyncing(true);
         const orderData = {
           customerName: customer.name.trim(),
           phone: customer.phone.trim(),
@@ -209,20 +149,22 @@
         };
 
         try {
-          if (window.db && window.firebaseFns) {
-            const { collection, addDoc } = window.firebaseFns;
-            await addDoc(collection(window.db, 'orders'), orderData);
-            showMsg('تم إرسال طلبك والدفع بنجاح للسحابة! 🎉');
-            setTimeout(() => {
-              setCart([]);
-              setCustomer({ name: '', phone: '', address: '', notes: '', paymentMethod: 'vodafone', transactionId: '' });
-              setView('store');
-            }, 2000);
-          } else {
-            alert('غير متصل بالسحابة لإرسال الطلب!');
-          }
+          await fetch(SCRIPT_URL, {
+            method: 'POST',
+            body: JSON.stringify({ action: 'addOrder', order: orderData })
+          });
+
+          showMsg('تم تسجيل الشراء بنجاح وتوثيقه في Google Sheets! 🎉');
+          setTimeout(() => {
+            setCart([]);
+            setCustomer({ name: '', phone: '', address: '', notes: '', paymentMethod: 'vodafone', transactionId: '' });
+            setView('store');
+          }, 2000);
+          await loadDataFromSheet();
         } catch (err) {
-          alert('فشل إرسال الطلب للسحابة: ' + err.message);
+          showMsg('حدث خطأ أثناء حفظ الطلب: ' + err.message);
+        } finally {
+          setIsSyncing(false);
         }
       };
 
@@ -234,12 +176,13 @@
             </div>
           )}
 
-          {/* الترويسة */}
           <header className="bg-white border-b border-slate-200 sticky top-0 z-30 p-4 shadow-sm">
             <div className="max-w-6xl mx-auto flex justify-between items-center">
               <div>
                 <h1 className="font-bold text-slate-900 text-base">{settings.storeName}</h1>
-                <p className="text-[11px] text-emerald-600 font-medium">{cloudStatus}</p>
+                <p className="text-[11px] text-emerald-600 font-medium">
+                  {isSyncing ? 'جاري مزامنة شيت جوجل 🔄' : 'مربوط بسحابة Google Sheets 📊 🟢'}
+                </p>
               </div>
               <div className="flex gap-2">
                 <button 
@@ -259,8 +202,8 @@
           </header>
 
           <main className="max-w-6xl mx-auto p-4 mt-4">
-            {!isDbReady ? (
-              <div className="text-center py-20 text-slate-400 font-bold text-sm">جاري الاتصال بقاعدة البيانات السحابية...</div>
+            {loading ? (
+              <div className="text-center py-20 text-slate-400 font-bold text-sm">جاري جلب البيانات من Google Sheets...</div>
             ) : view === 'store' ? (
               <div>
                 <div className="flex justify-between items-center mb-6">
@@ -270,12 +213,12 @@
 
                 {products.length === 0 ? (
                   <div className="text-center py-16 bg-white rounded-3xl border border-slate-200 shadow-sm">
-                    <p className="text-sm text-slate-500 mb-3">لا توجد منتجات مسجلة في المتجر حالياً.</p>
+                    <p className="text-sm text-slate-500 mb-3">لا توجد منتجات مسجلة حالياً.</p>
                     <button 
                       onClick={() => setView('admin')}
                       className="bg-amber-500 text-white px-5 py-2.5 rounded-xl text-xs font-bold shadow-md"
                     >
-                      اضغط هنا للانتقال للوحة التحكم وإضافة أول منتج 🚀
+                      الانتقال للوحة التحكم وإضافة أول منتج 🚀
                     </button>
                   </div>
                 ) : (
@@ -295,7 +238,7 @@
                           <button 
                             onClick={() => {
                               setCart([...cart, p]);
-                              showMsg(`تمت إضافة ${p.name} للسلة بنجاح`);
+                              showMsg(`تمت إضافة ${p.name} للسلة`);
                             }}
                             className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-md"
                           >
@@ -386,47 +329,29 @@
                     <h3 className="font-bold text-xs text-slate-700">2. اختر طريقة الدفع الأونلاين</h3>
                     
                     <div className="grid grid-cols-1 gap-2">
-                      {settings.enableVodafone && (
-                        <label className={`p-3 border rounded-xl flex items-center justify-between cursor-pointer ${customer.paymentMethod === 'vodafone' ? 'border-amber-500 bg-amber-50' : 'bg-slate-50'}`}>
-                          <div className="flex items-center gap-2">
-                            <input 
-                              type="radio" name="payment" value="vodafone"
-                              checked={customer.paymentMethod === 'vodafone'}
-                              onChange={e => setCustomer({...customer, paymentMethod: e.target.value})}
-                            />
-                            <span className="text-xs font-bold text-slate-800">محفظة إلكترونية (فودافون كاش / أورنج / اتصالات)</span>
-                          </div>
-                          <span className="text-[10px] bg-red-100 text-red-700 px-2 py-0.5 rounded font-bold">كاش 📱</span>
-                        </label>
-                      )}
+                      <label className={`p-3 border rounded-xl flex items-center justify-between cursor-pointer ${customer.paymentMethod === 'vodafone' ? 'border-amber-500 bg-amber-50' : 'bg-slate-50'}`}>
+                        <div className="flex items-center gap-2">
+                          <input 
+                            type="radio" name="payment" value="vodafone"
+                            checked={customer.paymentMethod === 'vodafone'}
+                            onChange={e => setCustomer({...customer, paymentMethod: e.target.value})}
+                          />
+                          <span className="text-xs font-bold text-slate-800">محفظة إلكترونية (فودافون كاش / أورنج / اتصالات)</span>
+                        </div>
+                        <span className="text-[10px] bg-red-100 text-red-700 px-2 py-0.5 rounded font-bold">كاش 📱</span>
+                      </label>
 
-                      {settings.enableVisa && (
-                        <label className={`p-3 border rounded-xl flex items-center justify-between cursor-pointer ${customer.paymentMethod === 'visa' ? 'border-amber-500 bg-amber-50' : 'bg-slate-50'}`}>
-                          <div className="flex items-center gap-2">
-                            <input 
-                              type="radio" name="payment" value="visa"
-                              checked={customer.paymentMethod === 'visa'}
-                              onChange={e => setCustomer({...customer, paymentMethod: e.target.value})}
-                            />
-                            <span className="text-xs font-bold text-slate-800">بطاقات الائتمان (فيزا / ماستركارد)</span>
-                          </div>
-                          <span className="text-[10px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded font-bold">Visa 💳</span>
-                        </label>
-                      )}
-
-                      {settings.enableCash && (
-                        <label className={`p-3 border rounded-xl flex items-center justify-between cursor-pointer ${customer.paymentMethod === 'cash' ? 'border-amber-500 bg-amber-50' : 'bg-slate-50'}`}>
-                          <div className="flex items-center gap-2">
-                            <input 
-                              type="radio" name="payment" value="cash"
-                              checked={customer.paymentMethod === 'cash'}
-                              onChange={e => setCustomer({...customer, paymentMethod: e.target.value})}
-                            />
-                            <span className="text-xs font-bold text-slate-800">الدفع نقداً عند الاستلام</span>
-                          </div>
-                          <span className="text-[10px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded font-bold">COD 💵</span>
-                        </label>
-                      )}
+                      <label className={`p-3 border rounded-xl flex items-center justify-between cursor-pointer ${customer.paymentMethod === 'cash' ? 'border-amber-500 bg-amber-50' : 'bg-slate-50'}`}>
+                        <div className="flex items-center gap-2">
+                          <input 
+                            type="radio" name="payment" value="cash"
+                            checked={customer.paymentMethod === 'cash'}
+                            onChange={e => setCustomer({...customer, paymentMethod: e.target.value})}
+                          />
+                          <span className="text-xs font-bold text-slate-800">الدفع نقداً عند الاستلام</span>
+                        </div>
+                        <span className="text-[10px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded font-bold">COD 💵</span>
+                      </label>
                     </div>
 
                     {customer.paymentMethod === 'vodafone' && (
@@ -450,10 +375,10 @@
                   </div>
 
                   <button 
-                    type="submit"
-                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-xl text-sm shadow-lg"
+                    type="submit" disabled={isSyncing}
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-xl text-sm shadow-lg disabled:opacity-50"
                   >
-                    تأكيد الطلب والدفع 🚀
+                    {isSyncing ? 'جاري الحفظ في شيت جوجل...' : 'تأكيد الطلب والدفع 🚀'}
                   </button>
                 </form>
               </div>
@@ -463,7 +388,6 @@
                   <div className="text-center py-8 space-y-4">
                     <div className="w-16 h-16 bg-amber-100 text-amber-600 rounded-2xl flex items-center justify-center mx-auto text-2xl">🔐</div>
                     <h2 className="text-xl font-bold">دخول لوحة تحكم المدير</h2>
-                    <p className="text-xs text-slate-400">كلمة السر الحالية: {settings.adminPassword}</p>
                     <input 
                       type="password"
                       placeholder="أدخل كلمة السر..."
@@ -505,18 +429,12 @@
                       >
                         📋 الطلبات الواردة ({orders.length})
                       </button>
-                      <button 
-                        onClick={() => setAdminTab('settings')} 
-                        className={`flex-1 py-2 rounded-lg transition-all ${adminTab === 'settings' ? 'bg-white shadow-sm text-amber-600' : 'text-slate-500'}`}
-                      >
-                        ⚙️ الإعدادات
-                      </button>
                     </div>
 
                     {adminTab === 'products' && (
                       <div className="space-y-4">
                         <form onSubmit={handleAddProduct} className="space-y-3 bg-slate-50 p-4 rounded-2xl border">
-                          <h3 className="font-bold text-xs text-amber-700">إضافة منتج جديد سحابياً</h3>
+                          <h3 className="font-bold text-xs text-amber-700">إضافة منتج جديد لـ Google Sheets</h3>
                           <input 
                             type="text" placeholder="اسم المنتج" required
                             value={newProd.name} onChange={e => setNewProd({...newProd, name: e.target.value})}
@@ -544,13 +462,13 @@
                             value={newProd.description} onChange={e => setNewProd({...newProd, description: e.target.value})}
                             className="w-full p-2.5 rounded-xl border text-xs"
                           ></textarea>
-                          <button type="submit" className="w-full bg-emerald-600 text-white font-bold py-2.5 rounded-xl text-xs shadow-md">
-                            نشر المنتج بالسحابة فوراً 🚀
+                          <button type="submit" disabled={isSyncing} className="w-full bg-emerald-600 text-white font-bold py-2.5 rounded-xl text-xs shadow-md disabled:opacity-50">
+                            {isSyncing ? 'جاري الحفظ...' : 'نشر المنتج في شيت جوجل 🚀'}
                           </button>
                         </form>
 
                         <div className="space-y-2">
-                          <h3 className="font-bold text-xs text-slate-600">المنتجات المسجلة سحابياً:</h3>
+                          <h3 className="font-bold text-xs text-slate-600">المنتجات المسجلة في شيت جوجل:</h3>
                           {products.map(p => (
                             <div key={p.id} className="flex justify-between items-center bg-slate-50 p-2.5 rounded-xl border text-xs">
                               <span className="font-bold">{p.name} - <span className="text-amber-600">{p.price} ج.م</span></span>
@@ -563,7 +481,7 @@
 
                     {adminTab === 'orders' && (
                       <div className="space-y-3">
-                        <h3 className="font-bold text-xs text-slate-900">طلبات العملاء الواردة ({orders.length}):</h3>
+                        <h3 className="font-bold text-xs text-slate-900">طلبات العملاء الواردة من شيت جوجل ({orders.length}):</h3>
                         {orders.length === 0 ? (
                           <p className="text-xs text-slate-400">لا توجد طلبات جديدة حتى الآن.</p>
                         ) : (
@@ -582,68 +500,6 @@
                         )}
                       </div>
                     )}
-
-                    {adminTab === 'settings' && (
-                      <form onSubmit={handleSaveSettings} className="space-y-4 text-xs">
-                        <h3 className="font-bold text-sm text-slate-900 border-b pb-2">إعدادات المتجر والدفع</h3>
-                        
-                        <div>
-                          <label className="block font-bold text-slate-600 mb-1">اسم المتجر</label>
-                          <input 
-                            type="text" required
-                            value={settings.storeName} onChange={e => setSettings({...settings, storeName: e.target.value})}
-                            className="w-full p-2.5 rounded-xl border"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block font-bold text-slate-600 mb-1">رقم محفظة كاش للتلقي (فودافون/أورنج/اتصالات)</label>
-                          <input 
-                            type="text" required
-                            value={settings.walletNumber} onChange={e => setSettings({...settings, walletNumber: e.target.value})}
-                            className="w-full p-2.5 rounded-xl border font-mono font-bold"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block font-bold text-slate-600 mb-1">كلمة سر لوحة التحكم</label>
-                          <input 
-                            type="text" required
-                            value={settings.adminPassword} onChange={e => setSettings({...settings, adminPassword: e.target.value})}
-                            className="w-full p-2.5 rounded-xl border font-bold"
-                          />
-                        </div>
-
-                        <div className="space-y-2 border-t pt-3">
-                          <label className="block font-bold text-slate-700">تفعيل/إيقاف طرق الدفع للمشترين:</label>
-                          <label className="flex items-center gap-2">
-                            <input 
-                              type="checkbox" checked={settings.enableVodafone}
-                              onChange={e => setSettings({...settings, enableVodafone: e.target.checked})}
-                            />
-                            <span>تفعيل الدفع عبر المحافظ الإلكترونية (فودافون كاش...)</span>
-                          </label>
-                          <label className="flex items-center gap-2">
-                            <input 
-                              type="checkbox" checked={settings.enableVisa}
-                              onChange={e => setSettings({...settings, enableVisa: e.target.checked})}
-                            />
-                            <span>تفعيل الدفع عبر الفيسا والماستركارد (Visa)</span>
-                          </label>
-                          <label className="flex items-center gap-2">
-                            <input 
-                              type="checkbox" checked={settings.enableCash}
-                              onChange={e => setSettings({...settings, enableCash: e.target.checked})}
-                            />
-                            <span>تفعيل الدفع نقداً عند الاستلام (COD)</span>
-                          </label>
-                        </div>
-
-                        <button type="submit" className="w-full bg-emerald-600 text-white font-bold py-3 rounded-xl shadow-md text-xs">
-                          حفظ التغيرات بالإعدادات ⚙️
-                        </button>
-                      </form>
-                    )}
                   </div>
                 )}
               </div>
@@ -651,7 +507,7 @@
           </main>
           
           <footer className="mt-12 text-center text-[11px] text-slate-400">
-            جميع الحقوق محفوظة © {settings.storeName} | El-Qazzaz Software Office
+            جميع الحقوق محفوظة © متجر مكتب القزاز للبرمجيات | El-Qazzaz Software Office
           </footer>
         </div>
       );
